@@ -1,0 +1,106 @@
+# After Effects MCP - Enhanced Multilingual Edition
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![MCP](https://img.shields.io/badge/MCP-compatible-6366f1)](https://modelcontextprotocol.io)
+
+> 🌍 **[العربية / Arabic README](README.ar.md)**
+
+Control Adobe After Effects from any MCP client (Claude Code / Claude Desktop) using natural
+language: create and inspect comps and layers, animate, apply effects and presets, manage
+masks/cameras, **render in the background**, and run arbitrary ExtendScript - with **first‑class
+Arabic / RTL support** and tools that work on After Effects in **any UI language**.
+
+This is an enhanced edition built on the original work of
+[**Dakkshin/after-effects-mcp**](https://github.com/Dakkshin/after-effects-mcp). See [CREDITS.md](CREDITS.md).
+
+---
+
+## ✨ Why this edition
+
+| Area | This edition |
+|---|---|
+| **Works in any AE language** | All standard property lookups use locale‑independent `matchName`s → no breakage on Arabic/French/German/Japanese AE |
+| **Arabic / RTL text** | `create-text-layer` auto‑detects Arabic, sets right‑to‑left direction and right alignment |
+| **Arbitrary scripting** | `execute-script` runs any ExtendScript → reach every AE feature |
+| **Deep inspection** | `inspect-comp` / `inspect-layer` - see exact state before editing |
+| **Rendering** | In‑app render queue **and** background `aerender` (no UI freeze) |
+| **Reliability** | Per‑command IDs (no stale results), one undo group per command, faster polling, OneDrive‑proof shared folder, `check-bridge` health/version check |
+| **Layer management** | Cameras, duplicate, delete, masks, batch transform, comp settings - as dedicated tools |
+
+**44 tools total.** Full details in [ENHANCEMENTS.md](ENHANCEMENTS.md).
+
+---
+
+## 📋 Prerequisites
+
+- **Adobe After Effects** 2022 or later
+- **Node.js 18+** - <https://nodejs.org>
+- An MCP client (e.g. **Claude Code**: `npm install -g @anthropic-ai/claude-code`)
+
+## 🚀 Setup
+
+```bash
+git clone https://github.com/a-y-ibrahim/after-effects-mcp.git
+cd after-effects-mcp
+npm install              # installs + builds
+npm run install-bridge   # copies the panel into AE's ScriptUI Panels
+```
+
+Then in After Effects:
+1. Enable scripting - **Windows**: Edit > Preferences > Scripting & Expressions; **macOS**: After Effects > Settings > Scripting & Expressions → enable **“Allow Scripts to Write Files and Access Network”**.
+2. Restart After Effects.
+3. **Window > mcp-bridge-auto.jsx** - keep this panel open.
+
+Register the server with your MCP client:
+```bash
+claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/index.js
+```
+
+**First test:** ask your client to *“check the After Effects bridge”*. It should report
+`bridgeVersion: 1.6.4-mcp-enhanced` and `versionMatch: true`.
+
+> 💡 If you edit the server, re‑run `npm run build`, then restart the MCP client.
+> If you edit the bridge, also re‑run `npm run install-bridge` and restart After Effects.
+
+---
+
+## 🧰 Tools at a glance
+
+**Inspection & diagnostics** - `inspect-comp`, `inspect-layer`, `get-results`, `check-bridge`, `run-bridge-test`, `get-help`
+**Composition & layers** - `create-composition`, `set-composition-properties`, `create-text-layer`, `create-camera`, `create-adjustment-layer`, `duplicate-layer`, `delete-layer`, `center-layers`, `set-layer-mask`, `batch-set-layer-properties`
+**Animation** - `setLayerKeyframe`, `setLayerExpression`, `get-layer-clip-frames`
+**Effects** - `apply-effect`, `add-any-effect`, `apply-effect-template`, `list-layer-effects`, `list-available-effects`, `set-effect-property`, `set-effect-keyframe`, `remove-effect`, `mcp_aftereffects_get_effects_help`
+**Presets** - `list-presets`, `search-presets`, `apply-preset`
+**Audio & markers** - `get-audio-info`, `set-audio-levels`, `analyze-audio-waveform`, `add-marker`, `add-markers-bulk`
+**Rendering** - `add-to-render-queue`, `render-queue`, `start-render`, `render-aerender`, `render-status`
+**Power** - `execute-script` (arbitrary ExtendScript), `run-script`, `test-animation`
+
+For project/comp overview you can also use `run-script` with `getProjectInfo` / `listCompositions`.
+
+---
+
+## 🌙 Arabic / RTL example
+
+> “Create a text layer that says ‘مرحبا بالعالم’”
+
+`create-text-layer` detects the Arabic text and automatically sets right‑to‑left direction and
+right alignment. Use a font that supports Arabic (e.g. `Tahoma`, `Cairo`). For full Arabic shaping,
+enable the Middle‑Eastern text engine in After Effects (**Windows**: Preferences > Type;
+**macOS**: Settings > Type).
+
+---
+
+## 🩺 Troubleshooting
+
+- **Anything times out / odd behavior** → ask *“check the After Effects bridge”* first.
+- **Version mismatch warning** → re‑run `npm run install-bridge`, restart After Effects.
+- **“Result file appears stale”** → the panel isn’t running or can’t write files; reopen it and confirm scripting permission.
+- **Windows + OneDrive** → the shared folder is `%LOCALAPPDATA%\ae-mcp-bridge` (OneDrive‑proof). Override both sides with the `AE_MCP_BRIDGE_DIR` env var if needed.
+
+---
+
+## 📄 Credits & License
+
+Licensed under the **MIT License**. Original work © 2025 Dakkshin; enhanced multilingual edition
+© 2026 Abdelrahman Youssef. See [LICENSE](LICENSE) and [CREDITS.md](CREDITS.md).

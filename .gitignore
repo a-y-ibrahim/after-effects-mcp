@@ -1,0 +1,69 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Build directories
+build/
+dist/
+
+# IDEs and editors
+.vscode/
+.idea/
+.cursor/
+*.sublime-*
+*.swp
+*.swo
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+*~
+*.bak
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# After Effects temporary files
+*.aep-lock
+*.aep Auto-Save
+*auto-save*
+
+# Build output
+/build
+
+# Temporary files
+/temp
+*.temp.*
+**/temp/
+
+# Test files
+manual_animation_test.jsx
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log* 
+
+# CLAUDE.md file
+CLAUDE.md
+settings.local.json
+
