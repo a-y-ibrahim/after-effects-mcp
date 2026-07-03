@@ -1,7 +1,7 @@
 {
   "name": "after-effects-mcp",
   "version": "1.6.4",
-  "description": "MCP server that gives AI assistants full programmatic control of Adobe After Effects: arbitrary ExtendScript execution, background rendering, deep project/layer inspection, and native Arabic/RTL and multilingual support.",
+  "description": "MCP server that gives AI assistants deep programmatic control of Adobe After Effects: arbitrary ExtendScript execution, background rendering, deep project/layer inspection, and native Arabic/RTL and multilingual support.",
   "main": "build/index.js",
   "type": "module",
   "author": "Abdelrahman Youssef",
@@ -35,6 +35,9 @@
     "build": "tsc && copyfiles -u 1 \"src/scripts/**/*\" build",
     "start": "node build/index.js",
     "install-bridge": "node install-bridge.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "npm run build"
   },
   "dependencies": {
@@ -45,6 +48,7 @@
   "devDependencies": {
     "@types/node": "^20.17.30",
     "copyfiles": "^2.4.1",
-    "typescript": "^5.2.2"
+    "typescript": "^5.2.2",
+    "vitest": "^4.1.9"
   }
 }

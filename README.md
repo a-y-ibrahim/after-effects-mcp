@@ -1,5 +1,6 @@
 # After Effects MCP - Enhanced Multilingual Edition
 
+[![CI](https://github.com/a-y-ibrahim/after-effects-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/a-y-ibrahim/after-effects-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-6366f1)](https://modelcontextprotocol.io)
@@ -97,6 +98,21 @@ enable the Middle‑Eastern text engine in After Effects (**Windows**: Preferenc
 - **Version mismatch warning** → re‑run `npm run install-bridge`, restart After Effects.
 - **“Result file appears stale”** → the panel isn’t running or can’t write files; reopen it and confirm scripting permission.
 - **Windows + OneDrive** → the shared folder is `%LOCALAPPDATA%\ae-mcp-bridge` (OneDrive‑proof). Override both sides with the `AE_MCP_BRIDGE_DIR` env var if needed.
+
+---
+
+## 🧪 Development
+
+```bash
+npm run build       # compile + copy the bridge script
+npm run typecheck   # tsc --noEmit
+npm test            # Vitest unit suite
+```
+
+Pure logic lives in [src/lib/bridge-core.ts](src/lib/bridge-core.ts) and is unit
+tested in [tests/bridge-core.test.ts](tests/bridge-core.test.ts). CI runs the
+type-check, build, and tests on Linux, macOS, and Windows across Node 18, 20, and
+22. See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture and how to add a tool.
 
 ---
 

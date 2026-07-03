@@ -6,6 +6,13 @@ import * as os from "os";
 import * as path from "path";
 import { z } from "zod";
 import { fileURLToPath } from 'url';
+import {
+  bridgeToolResult,
+  atomicWriteSync,
+  uniqueExistingDirs,
+  getDefaultPresetRoots,
+  makeCommandIdFactory,
+} from "./lib/bridge-core.js";
 
 
 const server = new McpServer({
@@ -95,12 +102,8 @@ function readResultsFromTempFile(): string {
 // Monotonic command-id generator. Each queued command gets a unique id so the
 // server can match the *exact* result for that command instead of guessing by
 // command name + freshness (which collides when the same command runs twice).
-let _cmdSeq = 0;
 let lastCommandId = "";
-function nextCommandId(): string {
-  _cmdSeq += 1;
-  return `${Date.now()}-${_cmdSeq}`;
-}
+const nextCommandId = makeCommandIdFactory();
 
 async function waitForBridgeResult(expectedCommand?: string, timeoutMs: number = 5000, pollMs: number = 250, expectedId?: string): Promise<string> {
   const start = Date.now();
@@ -148,22 +151,6 @@ async function waitForBridgeResult(expectedCommand?: string, timeoutMs: number =
   return JSON.stringify({ error: `Timed out waiting for bridge result${expectedCommand ? ` for command '${expectedCommand}'` : ''}.` });
 }
 
-
-// Write a file atomically (write to a .tmp sibling, then rename over the target)
-// so the AE panel never observes a half-written command/result file. renameSync
-// replaces the target atomically on the same volume; if it ever fails (e.g. the
-// other process briefly holds the target open on Windows), fall back to a direct
-// write - the reader already guards partial reads with JSON.parse + id-matching.
-function atomicWriteSync(target: string, data: string): void {
-  const tmp = target + '.tmp';
-  try {
-    fs.writeFileSync(tmp, data);
-    fs.renameSync(tmp, target);
-  } catch {
-    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
-    fs.writeFileSync(target, data);
-  }
-}
 
 function writeCommandFile(command: string, args: Record<string, any> = {}): string {
   try {
@@ -239,74 +226,6 @@ async function sendBridgeCommand(
     }
     return waitForBridgeResult(command, timeoutMs, pollMs, id);
   });
-}
-
-// Build an MCP tool response from a raw bridge result, flagging AE-side failures
-// (status:"error", success:false, an error field, or our synthetic timeout/write
-// payloads) as isError so the client treats them as errors instead of silently
-// successful output.
-function bridgeToolResult(raw: string): { content: { type: "text"; text: string }[]; isError?: boolean } {
-  let parsed: any = null;
-  try { parsed = JSON.parse(raw); } catch { /* non-JSON: pass through as opaque text */ }
-  const isError = !!parsed && (
-    parsed.status === "error" ||
-    parsed.success === false ||
-    parsed.error !== undefined
-  );
-  const response: { content: { type: "text"; text: string }[]; isError?: boolean } = {
-    content: [{ type: "text", text: raw }]
-  };
-  if (isError) response.isError = true;
-  return response;
-}
-
-function uniqueExistingDirs(pathsToCheck: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const p of pathsToCheck) {
-    if (!p) {
-      continue;
-    }
-    const normalized = path.normalize(p);
-    if (seen.has(normalized)) {
-      continue;
-    }
-    if (fs.existsSync(normalized)) {
-      try {
-        if (fs.statSync(normalized).isDirectory()) {
-          seen.add(normalized);
-          result.push(normalized);
-        }
-      } catch {
-        
-      }
-    }
-  }
-
-  return result;
-}
-
-function getDefaultPresetRoots(): string[] {
-  const home = os.homedir();
-  const years = ["2026", "2025", "2024"];
-
-  const roots = [
-    path.join(home, "Documents", "Adobe"),
-    path.join(home, "Documents", "Adobe", "After Effects"),
-    path.join(home, "Documents", "Adobe", "After Effects User Presets"),
-  ];
-
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA || "";
-    const programFiles = process.env.ProgramFiles || "C:\\Program Files";
-    roots.push(path.join(appData, "Adobe", "After Effects"));
-    for (const y of years) roots.push(path.join(programFiles, "Adobe", `Adobe After Effects ${y}`, "Support Files", "Presets"));
-  } else {
-    for (const y of years) roots.push(path.join("/Applications", `Adobe After Effects ${y}`, "Presets"));
-  }
-
-  return uniqueExistingDirs(roots);
 }
 
 function collectPresetFiles(
