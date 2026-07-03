@@ -12,7 +12,12 @@ import {
   uniqueExistingDirs,
   getDefaultPresetRoots,
   makeCommandIdFactory,
+  resolveBridgeDir,
+  aerenderCandidates,
+  tail,
 } from "./lib/bridge-core.js";
+import { collectPresetFiles } from "./lib/preset-scan.js";
+import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
 
 
 const server = new McpServer({
@@ -39,18 +44,7 @@ const TEMP_DIR = path.join(__dirname, "temp");
 // with the AE_MCP_BRIDGE_DIR env var if you need a custom shared location (it must
 // be set for BOTH the MCP server process and After Effects).
 function getAETempDir(): string {
-  let bridgeDir: string;
-  const override = process.env.AE_MCP_BRIDGE_DIR;
-  if (override && override.length > 0) {
-    bridgeDir = override;
-  } else if (process.platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-    bridgeDir = path.join(localAppData, 'ae-mcp-bridge');
-  } else {
-    // macOS: Documents is not subject to OneDrive KFM; keep the original location.
-    bridgeDir = path.join(os.homedir(), 'Documents', 'ae-mcp-bridge');
-  }
-
+  const bridgeDir = resolveBridgeDir(process.platform, process.env, os.homedir());
   if (!fs.existsSync(bridgeDir)) {
     fs.mkdirSync(bridgeDir, { recursive: true });
   }
@@ -227,83 +221,6 @@ async function sendBridgeCommand(
     return waitForBridgeResult(command, timeoutMs, pollMs, id);
   });
 }
-
-function collectPresetFiles(
-  roots: string[],
-  recursive: boolean,
-  query?: string,
-  maxResults: number = 500,
-  maxDepth: number = 10,
-): Array<{ path: string; name: string; directory: string; size: number; modifiedAt: string }> {
-  const results: Array<{ path: string; name: string; directory: string; size: number; modifiedAt: string }> = [];
-  const loweredQuery = query ? query.toLowerCase() : "";
-
-  function walk(currentDir: string, depth: number) {
-    if (results.length >= maxResults) {
-      return;
-    }
-    if (depth > maxDepth) {
-      return;
-    }
-
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (results.length >= maxResults) {
-        return;
-      }
-
-      const entryPath = path.join(currentDir, entry.name);
-
-      if (entry.isDirectory()) {
-        if (recursive) {
-          walk(entryPath, depth + 1);
-        }
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      if (!entry.name.toLowerCase().endsWith(".ffx")) {
-        continue;
-      }
-
-      if (loweredQuery && !entry.name.toLowerCase().includes(loweredQuery) && !entryPath.toLowerCase().includes(loweredQuery)) {
-        continue;
-      }
-
-      try {
-        const stat = fs.statSync(entryPath);
-        results.push({
-          path: entryPath,
-          name: entry.name,
-          directory: currentDir,
-          size: stat.size,
-          modifiedAt: stat.mtime.toISOString(),
-        });
-      } catch {
-        
-      }
-    }
-  }
-
-  for (const root of roots) {
-    if (results.length >= maxResults) {
-      break;
-    }
-    walk(root, 0);
-  }
-
-  return results;
-}
-
 
 server.resource(
   "compositions",
@@ -1479,94 +1396,11 @@ server.tool(
   }
 );
 
-function analyzeWavAmplitudes(filePath: string, numPoints: number = 200): {
-  duration: number;
-  sampleRate: number;
-  channels: number;
-  amplitudes: number[];
-  peakTimes: number[];
-  waveformPoints: Array<{ time: number; amplitude: number }>;
-} | null {
+// Thin fs wrapper: read the file, then delegate the byte parsing to the pure,
+// unit-tested analyzeWavBuffer. Any read/parse failure yields null.
+function analyzeWavAmplitudes(filePath: string, numPoints: number = 200): WavAnalysis | null {
   try {
-    const buf = fs.readFileSync(filePath);
-    if (buf.slice(0, 4).toString("ascii") !== "RIFF") return null;
-    if (buf.slice(8, 12).toString("ascii") !== "WAVE") return null;
-
-    let offset = 12;
-    let fmtChannels = 0, fmtSampleRate = 0, fmtBitsPerSample = 0, fmtAudioFormat = 0;
-    let dataOffset = -1, dataSize = 0;
-
-    while (offset < buf.length - 8) {
-      const chunkId = buf.slice(offset, offset + 4).toString("ascii");
-      const chunkSize = buf.readUInt32LE(offset + 4);
-      if (chunkId === "fmt ") {
-        fmtAudioFormat  = buf.readUInt16LE(offset + 8);
-        fmtChannels     = buf.readUInt16LE(offset + 10);
-        fmtSampleRate   = buf.readUInt32LE(offset + 12);
-        fmtBitsPerSample = buf.readUInt16LE(offset + 22);
-      } else if (chunkId === "data") {
-        dataOffset = offset + 8;
-        dataSize   = chunkSize;
-      }
-      offset += 8 + chunkSize + (chunkSize % 2 !== 0 ? 1 : 0);
-    }
-
-    if (dataOffset < 0 || fmtAudioFormat !== 1 || fmtChannels === 0) return null;
-
-    const bytesPerSample = fmtBitsPerSample / 8;
-    const totalSamples   = Math.floor(dataSize / (bytesPerSample * fmtChannels));
-    const duration       = totalSamples / fmtSampleRate;
-    const samplesPerPoint = Math.max(1, Math.floor(totalSamples / numPoints));
-    const maxVal = fmtBitsPerSample === 8 ? 128 : Math.pow(2, fmtBitsPerSample - 1);
-
-    const amplitudes: number[] = [];
-    const waveformPoints: Array<{ time: number; amplitude: number }> = [];
-
-    for (let i = 0; i < numPoints; i++) {
-      let maxAmp = 0;
-      const startSample = i * samplesPerPoint;
-      const endSample   = Math.min(startSample + samplesPerPoint, totalSamples);
-      for (let s = startSample; s < endSample; s++) {
-        for (let c = 0; c < fmtChannels; c++) {
-          const bytePos = dataOffset + (s * fmtChannels + c) * bytesPerSample;
-          if (bytePos + bytesPerSample > buf.length) continue;
-          let sample = 0;
-          if (fmtBitsPerSample === 16)       sample = Math.abs(buf.readInt16LE(bytePos));
-          else if (fmtBitsPerSample === 8)   sample = Math.abs(buf.readUInt8(bytePos) - 128);
-          else if (fmtBitsPerSample === 24) {
-            const lo = buf.readUInt16LE(bytePos);
-            const hi = buf.readInt8(bytePos + 2);
-            sample = Math.abs((hi << 16) | lo);
-          }
-          else if (fmtBitsPerSample === 32)  sample = Math.abs(buf.readInt32LE(bytePos));
-          if (sample > maxAmp) maxAmp = sample;
-        }
-      }
-      const norm = maxAmp / maxVal;
-      const t    = (i / numPoints) * duration;
-      amplitudes.push(norm);
-      waveformPoints.push({ time: parseFloat(t.toFixed(4)), amplitude: parseFloat(norm.toFixed(4)) });
-    }
-
-    const maxAmplitude = Math.max(...amplitudes);
-    const threshold = maxAmplitude * 0.6;
-    const minGapSamples = Math.floor(numPoints * 0.03);
-    const peakTimes: number[] = [];
-    let lastPeakIdx = -minGapSamples;
-
-    for (let i = 1; i < amplitudes.length - 1; i++) {
-      if (
-        amplitudes[i] > threshold &&
-        amplitudes[i] >= amplitudes[i - 1] &&
-        amplitudes[i] >= amplitudes[i + 1] &&
-        i - lastPeakIdx >= minGapSamples
-      ) {
-        peakTimes.push(parseFloat(waveformPoints[i].time.toFixed(3)));
-        lastPeakIdx = i;
-      }
-    }
-
-    return { duration, sampleRate: fmtSampleRate, channels: fmtChannels, amplitudes, peakTimes, waveformPoints };
+    return analyzeWavBuffer(fs.readFileSync(filePath), numPoints);
   } catch {
     return null;
   }
@@ -2020,15 +1854,9 @@ server.tool(
 function findAerender(): string | null {
   const override = process.env.AE_AERENDER_PATH;
   if (override && fs.existsSync(override)) return override;
-  const years = ["2026", "2025", "2024", "2023", "2022", "2021"];
-  const candidates: string[] = [];
-  if (process.platform === "win32") {
-    const pf = process.env.ProgramFiles || "C:\\Program Files";
-    for (const y of years) candidates.push(path.join(pf, "Adobe", `Adobe After Effects ${y}`, "Support Files", "aerender.exe"));
-  } else {
-    for (const y of years) candidates.push(path.join("/Applications", `Adobe After Effects ${y}`, "aerender"));
+  for (const c of aerenderCandidates(process.platform, process.env)) {
+    if (fs.existsSync(c)) return c;
   }
-  for (const c of candidates) { if (fs.existsSync(c)) return c; }
   return null;
 }
 
@@ -2038,8 +1866,7 @@ function pidAlive(pid: number): boolean {
 
 function tailFile(p: string, maxChars: number = 4000): string {
   try {
-    const s = fs.readFileSync(p, "utf8");
-    return s.length > maxChars ? s.slice(s.length - maxChars) : s;
+    return tail(fs.readFileSync(p, "utf8"), maxChars);
   } catch { return ""; }
 }
 

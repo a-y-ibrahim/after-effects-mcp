@@ -8,6 +8,9 @@ import {
   uniqueExistingDirs,
   candidatePresetRoots,
   makeCommandIdFactory,
+  resolveBridgeDir,
+  aerenderCandidates,
+  tail,
 } from "../src/lib/bridge-core";
 
 describe("bridgeToolResult", () => {
@@ -157,6 +160,75 @@ describe("candidatePresetRoots", () => {
     for (const year of ["2024", "2025", "2026"]) {
       expect(roots.some((r) => r.includes(year))).toBe(true);
     }
+  });
+});
+
+describe("resolveBridgeDir", () => {
+  it("lets a non-empty AE_MCP_BRIDGE_DIR override win on any platform", () => {
+    const dir = resolveBridgeDir("win32", { AE_MCP_BRIDGE_DIR: "X:\\shared" }, "C:\\Users\\x");
+    expect(dir).toBe("X:\\shared");
+    const dir2 = resolveBridgeDir("darwin", { AE_MCP_BRIDGE_DIR: "/shared" }, "/Users/x");
+    expect(dir2).toBe("/shared");
+  });
+
+  it("ignores an empty-string override and falls through to the platform default", () => {
+    const dir = resolveBridgeDir("darwin", { AE_MCP_BRIDGE_DIR: "" }, "/Users/x");
+    expect(dir).toContain("Documents");
+  });
+
+  it("uses LOCALAPPDATA on win32 when set (OneDrive-proof)", () => {
+    const dir = resolveBridgeDir("win32", { LOCALAPPDATA: "C:\\Users\\x\\AppData\\Local" }, "C:\\Users\\x");
+    expect(dir).toContain("AppData");
+    expect(dir).toContain("ae-mcp-bridge");
+  });
+
+  it("falls back to AppData/Local on win32 when LOCALAPPDATA is unset", () => {
+    const dir = resolveBridgeDir("win32", {}, "C:\\Users\\x");
+    expect(dir).toContain("AppData");
+    expect(dir).toContain("Local");
+  });
+
+  it("uses Documents on non-Windows platforms", () => {
+    const dir = resolveBridgeDir("darwin", {}, "/Users/x");
+    expect(dir).toContain("Documents");
+    expect(dir).toContain("ae-mcp-bridge");
+  });
+});
+
+describe("aerenderCandidates", () => {
+  it("builds Windows aerender.exe paths newest-year-first", () => {
+    const c = aerenderCandidates("win32", { ProgramFiles: "C:\\Program Files" });
+    expect(c[0]).toContain("2026");
+    expect(c[0]).toContain("aerender.exe");
+    expect(c.every((p) => p.includes("Program Files"))).toBe(true);
+  });
+
+  it("defaults ProgramFiles when unset on win32", () => {
+    const c = aerenderCandidates("win32", {});
+    expect(c[0]).toContain("Program Files");
+  });
+
+  it("builds macOS aerender paths (no .exe, no Support Files) on darwin", () => {
+    const c = aerenderCandidates("darwin", {});
+    expect(c[0]).toContain("Applications");
+    expect(c.some((p) => p.endsWith("aerender"))).toBe(true);
+    expect(c.some((p) => p.includes("aerender.exe"))).toBe(false);
+  });
+});
+
+describe("tail", () => {
+  it("returns the string unchanged when within the limit", () => {
+    expect(tail("hello", 4000)).toBe("hello");
+  });
+
+  it("returns exactly the last maxChars when over the limit", () => {
+    const s = "abcdefghij";
+    expect(tail(s, 3)).toBe("hij");
+    expect(tail(s, 3)).toHaveLength(3);
+  });
+
+  it("returns the whole string at the exact boundary", () => {
+    expect(tail("abc", 3)).toBe("abc");
   });
 });
 

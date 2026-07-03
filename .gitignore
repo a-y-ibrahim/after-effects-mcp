@@ -8,6 +8,9 @@ yarn-debug.log
 build/
 dist/
 
+# Test coverage
+coverage/
+
 # IDEs and editors
 .vscode/
 .idea/

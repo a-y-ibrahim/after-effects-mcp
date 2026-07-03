@@ -140,6 +140,64 @@ export function getDefaultPresetRoots(): string[] {
 }
 
 /**
+ * Resolve the folder shared between the Node server and the AE panel, WITHOUT
+ * creating it (the caller does the mkdir). An explicit `AE_MCP_BRIDGE_DIR`
+ * override always wins. Otherwise, on Windows we use `%LOCALAPPDATA%` because
+ * Documents is often redirected to OneDrive (Known Folder Move), which would
+ * make Node and After Effects resolve different paths and never meet. On other
+ * platforms Documents is safe. `platform`, `env`, and `homedir` are injectable
+ * for testing.
+ */
+export function resolveBridgeDir(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  homedir: string
+): string {
+  const override = env.AE_MCP_BRIDGE_DIR;
+  if (override && override.length > 0) {
+    return override;
+  }
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA || path.join(homedir, "AppData", "Local");
+    return path.join(localAppData, "ae-mcp-bridge");
+  }
+  return path.join(homedir, "Documents", "ae-mcp-bridge");
+}
+
+/**
+ * The platform-specific candidate paths for the `aerender` executable, newest
+ * After Effects version first, BEFORE filtering to the one that exists. Split
+ * out from findAerender so the path construction can be unit tested without a
+ * real Adobe install. `platform` and `env` are injectable.
+ */
+export function aerenderCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  const years = ["2026", "2025", "2024", "2023", "2022", "2021"];
+  const candidates: string[] = [];
+  if (platform === "win32") {
+    const pf = env.ProgramFiles || "C:\\Program Files";
+    for (const y of years)
+      candidates.push(
+        path.join(pf, "Adobe", `Adobe After Effects ${y}`, "Support Files", "aerender.exe")
+      );
+  } else {
+    for (const y of years)
+      candidates.push(path.join("/Applications", `Adobe After Effects ${y}`, "aerender"));
+  }
+  return candidates;
+}
+
+/**
+ * Return at most the last `maxChars` characters of a string (used to tail a
+ * render log). Pure; the file read stays in the caller.
+ */
+export function tail(s: string, maxChars: number = 4000): string {
+  return s.length > maxChars ? s.slice(s.length - maxChars) : s;
+}
+
+/**
  * Create a monotonic command-id generator. Each call to the returned function
  * yields a unique, strictly increasing id of the form `${now}-${seq}` so the
  * server can match the exact result for a command instead of guessing by

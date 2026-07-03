@@ -7,5 +7,13 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      // Scope coverage to the pure, unit-tested core. The large index.ts is the
+      // MCP wiring and the .jsx runs inside After Effects, so neither is unit
+      // tested here; including them would report a misleadingly low number.
+      include: ["src/lib/**"],
+    },
   },
 });
