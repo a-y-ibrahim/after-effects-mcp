@@ -15,9 +15,10 @@ import * as path from "path";
  * `status === "error"`, `success === false`, or any `error` field. Non-JSON
  * output is passed through untouched (never flagged), since we cannot inspect it.
  */
-export function bridgeToolResult(
-  raw: string
-): { content: { type: "text"; text: string }[]; isError?: boolean } {
+export function bridgeToolResult(raw: string): {
+  content: { type: "text"; text: string }[];
+  isError?: boolean;
+} {
   let parsed: any = null;
   try {
     parsed = JSON.parse(raw);
@@ -26,9 +27,7 @@ export function bridgeToolResult(
   }
   const isError =
     !!parsed &&
-    (parsed.status === "error" ||
-      parsed.success === false ||
-      parsed.error !== undefined);
+    (parsed.status === "error" || parsed.success === false || parsed.error !== undefined);
 
   const response: {
     content: { type: "text"; text: string }[];
@@ -104,7 +103,7 @@ export function uniqueExistingDirs(pathsToCheck: string[]): string[] {
 export function candidatePresetRoots(
   home: string,
   platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const years = ["2026", "2025", "2024"];
 
@@ -120,7 +119,7 @@ export function candidatePresetRoots(
     if (appData) roots.push(path.join(appData, "Adobe", "After Effects"));
     for (const y of years)
       roots.push(
-        path.join(programFiles, "Adobe", `Adobe After Effects ${y}`, "Support Files", "Presets")
+        path.join(programFiles, "Adobe", `Adobe After Effects ${y}`, "Support Files", "Presets"),
       );
   } else {
     for (const y of years)
@@ -151,7 +150,7 @@ export function getDefaultPresetRoots(): string[] {
 export function resolveBridgeDir(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
-  homedir: string
+  homedir: string,
 ): string {
   const override = env.AE_MCP_BRIDGE_DIR;
   if (override && override.length > 0) {
@@ -172,7 +171,7 @@ export function resolveBridgeDir(
  */
 export function aerenderCandidates(
   platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const years = ["2026", "2025", "2024", "2023", "2022", "2021"];
   const candidates: string[] = [];
@@ -180,7 +179,7 @@ export function aerenderCandidates(
     const pf = env.ProgramFiles || "C:\\Program Files";
     for (const y of years)
       candidates.push(
-        path.join(pf, "Adobe", `Adobe After Effects ${y}`, "Support Files", "aerender.exe")
+        path.join(pf, "Adobe", `Adobe After Effects ${y}`, "Support Files", "aerender.exe"),
       );
   } else {
     for (const y of years)
@@ -205,9 +204,7 @@ export function tail(s: string, maxChars: number = 4000): string {
  * a row). `now` is injectable so tests can assert uniqueness without depending
  * on wall-clock timing.
  */
-export function makeCommandIdFactory(
-  now: () => number = () => Date.now()
-): () => string {
+export function makeCommandIdFactory(now: () => number = () => Date.now()): () => string {
   let seq = 0;
   return () => {
     seq += 1;

@@ -19,15 +19,15 @@ This is an enhanced edition built on the original work of
 
 ## ✨ Why this edition
 
-| Area | This edition |
-|---|---|
-| **Works in any AE language** | All standard property lookups use locale‑independent `matchName`s → no breakage on Arabic/French/German/Japanese AE |
-| **Arabic / RTL text** | `create-text-layer` auto‑detects Arabic, sets right‑to‑left direction and right alignment |
-| **Arbitrary scripting** | `execute-script` runs any ExtendScript → reach every AE feature |
-| **Deep inspection** | `inspect-comp` / `inspect-layer` - see exact state before editing |
-| **Rendering** | In‑app render queue **and** background `aerender` (no UI freeze) |
-| **Reliability** | Per‑command IDs (no stale results), one undo group per command, faster polling, OneDrive‑proof shared folder, `check-bridge` health/version check |
-| **Layer management** | Cameras, duplicate, delete, masks, batch transform, comp settings - as dedicated tools |
+| Area                         | This edition                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Works in any AE language** | All standard property lookups use locale‑independent `matchName`s → no breakage on Arabic/French/German/Japanese AE                               |
+| **Arabic / RTL text**        | `create-text-layer` auto‑detects Arabic, sets right‑to‑left direction and right alignment                                                         |
+| **Arbitrary scripting**      | `execute-script` runs any ExtendScript → reach every AE feature                                                                                   |
+| **Deep inspection**          | `inspect-comp` / `inspect-layer` - see exact state before editing                                                                                 |
+| **Rendering**                | In‑app render queue **and** background `aerender` (no UI freeze)                                                                                  |
+| **Reliability**              | Per‑command IDs (no stale results), one undo group per command, faster polling, OneDrive‑proof shared folder, `check-bridge` health/version check |
+| **Layer management**         | Cameras, duplicate, delete, masks, batch transform, comp settings - as dedicated tools                                                            |
 
 **44 tools total.** Full details in [ENHANCEMENTS.md](ENHANCEMENTS.md).
 
@@ -49,16 +49,18 @@ npm run install-bridge   # copies the panel into AE's ScriptUI Panels
 ```
 
 Then in After Effects:
+
 1. Enable scripting - **Windows**: Edit > Preferences > Scripting & Expressions; **macOS**: After Effects > Settings > Scripting & Expressions → enable **“Allow Scripts to Write Files and Access Network”**.
 2. Restart After Effects.
 3. **Window > mcp-bridge-auto.jsx** - keep this panel open.
 
 Register the server with your MCP client:
+
 ```bash
 claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/index.js
 ```
 
-**First test:** ask your client to *“check the After Effects bridge”*. It should report
+**First test:** ask your client to _“check the After Effects bridge”_. It should report
 `bridgeVersion: 1.6.4-mcp-enhanced` and `versionMatch: true`.
 
 > 💡 If you edit the server, re‑run `npm run build`, then restart the MCP client.
@@ -96,7 +98,7 @@ enable the Middle‑Eastern text engine in After Effects (**Windows**: Preferenc
 
 ## 🩺 Troubleshooting
 
-- **Anything times out / odd behavior** → ask *“check the After Effects bridge”* first.
+- **Anything times out / odd behavior** → ask _“check the After Effects bridge”_ first.
 - **Version mismatch warning** → re‑run `npm run install-bridge`, restart After Effects.
 - **“Result file appears stale”** → the panel isn’t running or can’t write files; reopen it and confirm scripting permission.
 - **Windows + OneDrive** → the shared folder is `%LOCALAPPDATA%\ae-mcp-bridge` (OneDrive‑proof). Override both sides with the `AE_MCP_BRIDGE_DIR` env var if needed.
@@ -113,8 +115,7 @@ npm test            # Vitest unit suite
 
 Pure logic lives in [src/lib/bridge-core.ts](src/lib/bridge-core.ts) and is unit
 tested in [tests/bridge-core.test.ts](tests/bridge-core.test.ts). CI runs the
-type-check, build, and tests on Linux, macOS, and Windows across Node 18, 20, and
-22. See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture and how to add a tool.
+type-check, build, and tests on Linux, macOS, and Windows across Node 18, 20, and 22. See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture and how to add a tool.
 
 ---
 

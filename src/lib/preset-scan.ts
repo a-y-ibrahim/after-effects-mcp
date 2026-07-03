@@ -20,7 +20,7 @@ export function collectPresetFiles(
   recursive: boolean,
   query?: string,
   maxResults: number = 500,
-  maxDepth: number = 10
+  maxDepth: number = 10,
 ): PresetFile[] {
   const results: PresetFile[] = [];
   const loweredQuery = query ? query.toLowerCase() : "";

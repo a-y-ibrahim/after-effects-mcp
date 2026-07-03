@@ -177,7 +177,11 @@ describe("resolveBridgeDir", () => {
   });
 
   it("uses LOCALAPPDATA on win32 when set (OneDrive-proof)", () => {
-    const dir = resolveBridgeDir("win32", { LOCALAPPDATA: "C:\\Users\\x\\AppData\\Local" }, "C:\\Users\\x");
+    const dir = resolveBridgeDir(
+      "win32",
+      { LOCALAPPDATA: "C:\\Users\\x\\AppData\\Local" },
+      "C:\\Users\\x",
+    );
     expect(dir).toContain("AppData");
     expect(dir).toContain("ae-mcp-bridge");
   });

@@ -6,6 +6,7 @@ without breaking any existing tool. All additions are backward compatible.
 ## What was added
 
 ### -2. Multilingual + Arabic / RTL (works on After Effects in any language)
+
 - **Locale independence:** every standard property lookup (transform, text, masks, audio,
   camera, effects, shapes) now uses locale‑independent `matchName`s (e.g. `ADBE Position`)
   instead of English display names (`Position`). The tools no longer break on Arabic / French /
@@ -16,6 +17,7 @@ without breaking any existing tool. All additions are backward compatible.
   (`auto` | `rtl` | `ltr`). For full Arabic shaping, enable AE's Middle‑Eastern text engine.
 
 ### -1. Layer management (ported from Dakkshin/after-effects-mcp, upgraded)
+
 Dedicated, typed tools that the Dakkshin repo only exposed via `run-script`, here
 rebuilt as first-class tools with inline-wait + id-matching + undo grouping:
 `create-camera`, `duplicate-layer`, `delete-layer`, `set-layer-mask`
@@ -24,6 +26,7 @@ on many layers at once), `set-composition-properties` (duration/fps/size). With 
 this version now covers everything Dakkshin, TheLlamainator, and our own additions do.
 
 ### 0. `inspect-layer` - see precisely before editing precisely
+
 Deep, structured dump of one layer: type, flags, in/out, parent, blend mode, 3D; the
 full Transform group (each property's value + expression + keyframes with
 times/values/interpolation); all effects with their property values; masks; markers;
@@ -32,6 +35,7 @@ control reliable - read the exact current state, then edit with `set-effect-prop
 `setLayerKeyframe`, or `execute-script`.
 
 ### 1. `execute-script` - arbitrary ExtendScript (the big one)
+
 Runs any After Effects scripting DOM code and returns the result. This unlocks
 everything the fixed tool set never covered: **masks, track mattes, parenting,
 3D layers / cameras / lights, blending modes, precomposing, time remapping,
@@ -44,11 +48,13 @@ batch edits, project-wide changes**, etc.
 - On error you get the message **and the line number**.
 
 Example:
+
 ```
 return { name: app.project.activeItem.name, layers: app.project.activeItem.numLayers };
 ```
 
 ### 2a. Background rendering via aerender (no UI freeze)
+
 - `render-aerender` - renders a comp using **aerender** (a separate headless AE
   process), so your After Effects UI stays responsive. Requires a **saved** project
   (it saves the open project first by default, or pass `projectPath`). Supports
@@ -62,10 +68,12 @@ return { name: app.project.activeItem.name, layers: app.project.activeItem.numLa
 > are both available - pick blocking for quick one-offs, aerender for long renders.
 
 ### 2b. Tool consolidation
+
 Removed the redundant `mcp_aftereffects_applyEffect` / `mcp_aftereffects_applyEffectTemplate`
 duplicates (they used a fixed 1s sleep). Use `apply-effect` / `apply-effect-template`.
 
 ### 2. Render queue automation
+
 - `add-to-render-queue` - add a comp (by `compName`, `compIndex`, or active),
   set `outputPath`, apply existing Render Settings / Output Module templates,
   and optionally a render span (`startTime`/`endTime`).
@@ -75,15 +83,16 @@ duplicates (they used a fixed 1s sleep). Use `apply-effect` / `apply-effect-temp
   times out the render keeps going and you can re-check with `render-queue`.
 
 ### 3. Bridge robustness + speed (affects every command)
+
 - **Command IDs:** each queued command carries a unique id and the result echoes it
-  back (`_commandId`). New tools wait for their *exact* result instead of guessing by
+  back (`_commandId`). New tools wait for their _exact_ result instead of guessing by
   command name - eliminates stale/duplicate-result mix-ups.
 - **Single undo group per command:** every MCP command is wrapped in one
   `beginUndoGroup`/`endUndoGroup`, so one Ctrl+Z cleanly reverses it.
 - **Faster polling:** bridge poll interval lowered `2000ms → 750ms` for snappier
   round-trips on multi-step work.
 - **Every tool is now id-matched:** `waitForBridgeResult` falls back to the last
-  queued command's id, so *all* tools (not just the new ones) wait for their own
+  queued command's id, so _all_ tools (not just the new ones) wait for their own
   result instead of guessing by command name.
 - **Immediate, precise feedback:** the authoring tools that used to just say
   "command queued - call get-results" (`run-script`, `create-composition`,
@@ -91,6 +100,7 @@ duplicates (they used a fixed 1s sleep). Use `apply-effect` / `apply-effect-temp
   now wait inline and return the real bridge result in one call.
 
 ### 4. OneDrive-proof shared folder (Windows reliability fix)
+
 The server (Node) and the panel (ExtendScript) must read/write the SAME folder.
 Previously both used `Documents/ae-mcp-bridge`, but on Windows the Documents folder is
 often redirected to OneDrive (Known Folder Move), and the two processes could then
@@ -101,6 +111,7 @@ never redirected by OneDrive and is identical for both processes). Override with
 keeps `Documents/ae-mcp-bridge`.
 
 ### 5. `check-bridge` - health + version handshake
+
 Verifies the panel is open and responding, and reports the bridge version, AE version,
 the shared bridge folder, and the open project / active comp. **Run it first whenever
 anything times out.** If the bridge version does not match the server's expected version
@@ -108,7 +119,9 @@ it warns explicitly - this catches the common "edited the server but forgot to r
 `npm run install-bridge`" case (old panel + new server = "Unknown command").
 
 ### 6. Reliability audit (v1.6.4) - atomic writes, concurrency safety, real error surfacing
+
 A full pass over the bridge protocol fixed issues that only show up under live use:
+
 - **Atomic command/result writes:** the server writes to a temp file and renames it into
   place (with a direct-write fallback), so a reader can never see a half-written file.
 - **Concurrency-safe dispatch:** a promise-queue mutex (`bridgeMutex`) plus a unified
@@ -130,6 +143,7 @@ A full pass over the bridge protocol fixed issues that only show up under live u
   `String.prototype.trim`, and `Object.keys`.
 
 ### 7. Single dockable panel (v1.6.0–1.6.1)
+
 The bridge previously always opened as a floating window, leaving an empty, unusable tab
 behind whenever it was launched from **Window > mcp-bridge-auto.jsx** (After Effects'
 normal dockable-panel entry point). Root cause: it never used the `Panel` object AE passes
@@ -149,11 +163,14 @@ cd after-effects-mcp
 npm run build            # compiles src/index.ts -> build/, copies bridge jsx
 npm run install-bridge   # pushes the updated bridge into AE's ScriptUI Panels
 ```
+
 Then:
+
 1. Restart **After Effects**, and reopen `Window > mcp-bridge-auto.jsx` (keep it open).
 2. Restart your **MCP client** (Claude Code / Desktop) so it reloads the new server tools.
 
 ## Honest remaining limitations
+
 - Still **one command at a time** (the bridge processes a single command file);
   the ID system, mutex, and atomic writes make that collision-safe and fast, but it is
   not a parallel queue.

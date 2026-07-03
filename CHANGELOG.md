@@ -7,6 +7,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
 - Unit test suite (Vitest) covering bridge result parsing, atomic writes, preset
   path resolution, and command-id generation.
 - Continuous integration (GitHub Actions) running type-check, build, and tests on
@@ -16,16 +17,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   issue and pull-request templates.
 
 ### Changed
+
 - `index.ts` now imports its result-parsing, path-resolution, and id-generation
   helpers from `src/lib/bridge-core.ts` instead of defining them inline.
 
 ## [1.6.4] - 2026-07
 
 ### Added
+
 - Reliability audit of the bridge protocol: atomic command/result writes, a
   concurrency-safe dispatch mutex, and real AE-side errors surfaced as errors.
 
 ### Fixed
+
 - Single dockable panel on launch: the bridge no longer leaves an empty tab behind
   when opened from the Window menu.
 - Cross-platform preset roots and bridge install paths for macOS and Windows.
@@ -33,6 +37,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [1.6.0] - 2026-06
 
 ### Added
+
 - `execute-script` (arbitrary ExtendScript), `inspect-comp`, and `inspect-layer`.
 - Background rendering via `aerender` (`render-aerender`, `render-status`).
 - Locale-independent property lookups (`matchName`) and native Arabic / RTL text.

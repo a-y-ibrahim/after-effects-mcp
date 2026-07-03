@@ -58,15 +58,15 @@ case (old panel + new server = unknown command).
 
 ## Code layout
 
-| Path | Role |
-|---|---|
-| `src/index.ts` | The MCP server: tool registrations and the file-bridge dispatch. |
-| `src/lib/bridge-core.ts` | Pure helpers: result parsing, atomic writes, path/platform resolution, command-id generation. Unit tested. |
-| `src/lib/preset-scan.ts` | Recursive `.ffx` preset scanner. Unit tested. |
-| `src/lib/wav.ts` | Pure WAV amplitude analysis and peak detection. Unit tested. |
-| `src/scripts/mcp-bridge-auto.jsx` | The ExtendScript panel that runs inside After Effects and executes queued commands. ES3-era; not Node. |
-| `tests/*.test.ts` | Vitest unit tests for the pure core. |
-| `tests/*.cjs` | Manual probes against a live After Effects (not part of the automated suite). |
+| Path                              | Role                                                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`                    | The MCP server: tool registrations and the file-bridge dispatch.                                           |
+| `src/lib/bridge-core.ts`          | Pure helpers: result parsing, atomic writes, path/platform resolution, command-id generation. Unit tested. |
+| `src/lib/preset-scan.ts`          | Recursive `.ffx` preset scanner. Unit tested.                                                              |
+| `src/lib/wav.ts`                  | Pure WAV amplitude analysis and peak detection. Unit tested.                                               |
+| `src/scripts/mcp-bridge-auto.jsx` | The ExtendScript panel that runs inside After Effects and executes queued commands. ES3-era; not Node.     |
+| `tests/*.test.ts`                 | Vitest unit tests for the pure core.                                                                       |
+| `tests/*.cjs`                     | Manual probes against a live After Effects (not part of the automated suite).                              |
 
 The rule of thumb: logic that can run without a live After Effects lives in
 `src/lib/` and is unit tested; everything that needs the running app goes through

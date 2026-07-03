@@ -133,7 +133,7 @@ describe("analyzeWavBuffer decoding", () => {
         frames,
         extraChunkBefore: { id: "LIST", size: 3 }, // odd size -> 1 pad byte
       }),
-      6
+      6,
     );
     expect(r).not.toBeNull();
     expect(r!.channels).toBe(1);
