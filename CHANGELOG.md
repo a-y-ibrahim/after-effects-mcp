@@ -8,18 +8,35 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Unit test suite (Vitest) covering bridge result parsing, atomic writes, preset
-  path resolution, and command-id generation.
+- Unit test suite (Vitest, 53 tests) covering bridge result parsing, atomic
+  writes, preset path resolution, command-id generation, platform path helpers,
+  the `.ffx` preset scanner, and WAV amplitude analysis, with scoped v8 coverage
+  (`npm run test:coverage`, about 94% over `src/lib`).
 - Continuous integration (GitHub Actions) running type-check, build, and tests on
   Linux, macOS, and Windows across Node 18, 20, and 22.
-- `src/lib/bridge-core.ts`: pure, testable helpers extracted from `index.ts`.
-- Project maturity docs: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
-  issue and pull-request templates.
+- CodeQL security scanning and Dependabot (npm + GitHub Actions) workflows.
+- ESLint (flat config) and Prettier, with `lint`, `format`, and `format:check`
+  scripts.
+- Documentation: `docs/ARCHITECTURE.md` (the file-bridge protocol and code
+  layout) and `docs/TOOLS.md` (a reference for all 44 tools).
+- Project maturity docs and config: `CONTRIBUTING.md`, `SECURITY.md`,
+  `CODE_OF_CONDUCT.md`, issue and pull-request templates, `.editorconfig`,
+  `.gitattributes`, and `.nvmrc`.
+- New unit-tested modules: `src/lib/bridge-core.ts`, `src/lib/preset-scan.ts`,
+  and `src/lib/wav.ts`.
 
 ### Changed
 
-- `index.ts` now imports its result-parsing, path-resolution, and id-generation
-  helpers from `src/lib/bridge-core.ts` instead of defining them inline.
+- Extracted pure logic (result parsing, atomic writes, preset scanning, WAV
+  analysis, platform path resolution) out of `index.ts` into focused, unit-tested
+  `src/lib` modules, with no change to the tool surface or behavior.
+- The build is now deterministic (it cleans its output first), so stale artifacts
+  never ship.
+
+### Fixed
+
+- Global and production installs no longer fail: replaced the `postinstall` build
+  (which needs dev dependencies) with `prepare`/`prepack`.
 
 ## [1.6.4] - 2026-07
 
