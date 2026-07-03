@@ -1,0 +1,3 @@
+# Bulk reformatting commits to skip in git blame.
+# Configure once: git config blame.ignoreRevsFile .git-blame-ignore-revs
+11339ce4c6154879cb4e2db74c1d7dde9ce7a384
