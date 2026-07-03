@@ -79,6 +79,8 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 
 For project/comp overview you can also use `run-script` with `getProjectInfo` / `listCompositions`.
 
+📖 Full reference: [docs/TOOLS.md](docs/TOOLS.md) (all 44 tools) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the bridge works).
+
 ---
 
 ## 🌙 Arabic / RTL example

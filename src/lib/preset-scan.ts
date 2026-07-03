@@ -33,7 +33,7 @@ export function collectPresetFiles(
       return;
     }
 
-    let entries: fs.Dirent[] = [];
+    let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(currentDir, { withFileTypes: true });
     } catch {

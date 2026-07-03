@@ -1,6 +1,6 @@
 ﻿import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { execSync, spawn } from "child_process";
+import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -133,11 +133,11 @@ async function waitForBridgeResult(expectedCommand?: string, timeoutMs: number =
               }
             }
           } catch {
-
+            /* partial/invalid JSON mid-write: keep polling */
           }
         }
       } catch {
-
+        /* result file briefly unreadable: keep polling */
       }
     }
     await new Promise(r => setTimeout(r, pollMs));

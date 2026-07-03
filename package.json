@@ -40,6 +40,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "prepare": "npm run build",
     "prepack": "npm run build"
   },
@@ -49,10 +52,15 @@
     "zod": "^3.22.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.17.30",
     "@vitest/coverage-v8": "^4.1.9",
     "copyfiles": "^2.4.1",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.4",
     "typescript": "^5.2.2",
+    "typescript-eslint": "^8.62.1",
     "vitest": "^4.1.9"
   }
 }
