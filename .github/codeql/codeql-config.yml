@@ -1,0 +1,8 @@
+name: "CodeQL config"
+
+# The bridge panel is ES3-era ExtendScript that runs inside After Effects, not
+# Node. It trips CodeQL false positives, so exclude it from analysis.
+paths-ignore:
+  - "src/scripts/**"
+  - "build/**"
+  - "tests/**/*.cjs"

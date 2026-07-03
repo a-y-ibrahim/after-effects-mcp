@@ -32,13 +32,15 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc && copyfiles -u 1 \"src/scripts/**/*\" build",
+    "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc && copyfiles -u 1 \"src/scripts/**/*\" build",
     "start": "node build/index.js",
     "install-bridge": "node install-bridge.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "npm run build"
+    "prepare": "npm run build",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

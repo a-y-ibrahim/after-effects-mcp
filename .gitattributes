@@ -1,0 +1,22 @@
+# Normalize line endings: store everything as LF in the repo, let Git convert on
+# checkout per platform. Keeps a Windows-authored repo consistent for macOS/Linux
+# contributors and CI.
+* text=auto eol=lf
+
+# Git hooks and shell scripts must stay LF to execute on every OS.
+.githooks/* text eol=lf
+*.sh text eol=lf
+
+# ExtendScript runs inside After Effects; LF is safe. Tell GitHub it's JavaScript
+# so it is highlighted and counted correctly in language stats.
+*.jsx text eol=lf linguist-language=JavaScript
+
+# Binary assets: never diff or convert.
+*.png binary
+*.gif binary
+*.mp4 binary
+*.aep binary
+
+# Generated / vendored: collapse in diffs and exclude from language stats.
+build/** linguist-generated=true
+package-lock.json -diff linguist-generated=true
