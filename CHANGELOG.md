@@ -37,7 +37,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ESLint (flat config) and Prettier, with `lint`, `format`, and `format:check`
   scripts.
 - Documentation: `docs/ARCHITECTURE.md` (the file-bridge protocol and code
-  layout) and `docs/TOOLS.md` (a reference for all 44 tools).
+  layout) and `docs/TOOLS.md` (a reference for all 47 tools).
 - Project maturity docs and config: `CONTRIBUTING.md`, `SECURITY.md`,
   `CODE_OF_CONDUCT.md`, issue and pull-request templates, `.editorconfig`,
   `.gitattributes`, and `.nvmrc`.

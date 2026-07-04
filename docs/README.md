@@ -1,6 +1,6 @@
 # Documentation
 
-- **[Tool Reference](TOOLS.md)** - the full catalog of all 44 tools, grouped by area.
+- **[Tool Reference](TOOLS.md)** - the full catalog of all 47 tools, grouped by area.
 - **[Architecture](ARCHITECTURE.md)** - how the file bridge works, the shared
   folder, versioning, and the code layout.
 
