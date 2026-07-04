@@ -15,6 +15,9 @@ export interface WavAnalysis {
 }
 
 export function analyzeWavBuffer(buf: Buffer, numPoints: number = 200): WavAnalysis | null {
+  // Bound the output resolution so a huge numPoints cannot force allocation of
+  // giant arrays before anything else runs.
+  numPoints = Math.min(Math.max(1, Math.floor(numPoints)), 100000);
   if (buf.slice(0, 4).toString("ascii") !== "RIFF") return null;
   if (buf.slice(8, 12).toString("ascii") !== "WAVE") return null;
 
@@ -42,6 +45,11 @@ export function analyzeWavBuffer(buf: Buffer, numPoints: number = 200): WavAnaly
   }
 
   if (dataOffset < 0 || fmtAudioFormat !== 1 || fmtChannels === 0) return null;
+  // Reject unsupported bit depths (0 would make bytesPerSample 0 -> Infinity math),
+  // and clamp the declared data size to what the buffer actually holds so a crafted
+  // header cannot claim a huge chunk and drive billions of no-op iterations (DoS).
+  if (![8, 16, 24, 32].includes(fmtBitsPerSample)) return null;
+  dataSize = Math.min(dataSize, Math.max(0, buf.length - dataOffset));
 
   const bytesPerSample = fmtBitsPerSample / 8;
   const totalSamples = Math.floor(dataSize / (bytesPerSample * fmtChannels));

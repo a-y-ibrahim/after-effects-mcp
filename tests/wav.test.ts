@@ -87,6 +87,56 @@ describe("analyzeWavBuffer header validation", () => {
     const b = writeWav({ sampleRate: 8000, bits: 16, channels: 1, frames: [[0]], audioFormat: 3 });
     expect(analyzeWavBuffer(b)).toBeNull();
   });
+
+  it("rejects an unsupported bit depth instead of producing garbage (bitsPerSample=0)", () => {
+    // Hand-build a header with bitsPerSample = 0 (writeWav can't emit 0-bit).
+    const fmt = Buffer.alloc(16);
+    fmt.writeUInt16LE(1, 0); // PCM
+    fmt.writeUInt16LE(1, 2); // mono
+    fmt.writeUInt32LE(8000, 4);
+    fmt.writeUInt16LE(0, 14); // bitsPerSample = 0
+    const body = Buffer.concat([
+      Buffer.from("WAVE"),
+      Buffer.from("fmt "),
+      u32(16),
+      fmt,
+      Buffer.from("data"),
+      u32(16),
+      Buffer.alloc(16),
+    ]);
+    const b = Buffer.concat([Buffer.from("RIFF"), u32(body.length), body]);
+    expect(analyzeWavBuffer(b)).toBeNull();
+  });
+
+  it("does not hang or churn on a data chunk that lies about its size (DoS guard)", () => {
+    // Tiny buffer, but the data chunk claims ~4 GB. The clamp must bound the work.
+    const fmt = Buffer.alloc(16);
+    fmt.writeUInt16LE(1, 0);
+    fmt.writeUInt16LE(1, 2);
+    fmt.writeUInt32LE(8000, 4);
+    fmt.writeUInt16LE(16, 14);
+    const body = Buffer.concat([
+      Buffer.from("WAVE"),
+      Buffer.from("fmt "),
+      u32(16),
+      fmt,
+      Buffer.from("data"),
+      u32(0xffffffff), // lies: claims 4 GB of samples
+      Buffer.alloc(8), // but only 8 bytes are present
+    ]);
+    const b = Buffer.concat([Buffer.from("RIFF"), u32(body.length), body]);
+    const start = Date.now();
+    const r = analyzeWavBuffer(b, 200);
+    // Should return promptly (clamped), not spin for seconds.
+    expect(Date.now() - start).toBeLessThan(1000);
+    if (r) expect(r.waveformPoints).toHaveLength(200);
+  });
+
+  it("clamps an absurd numPoints instead of allocating giant arrays", () => {
+    const frames = Array.from({ length: 50 }, () => [10000]);
+    const r = analyzeWavBuffer(writeWav({ sampleRate: 50, bits: 16, channels: 1, frames }), 1e9)!;
+    expect(r.waveformPoints.length).toBeLessThanOrEqual(100000);
+  });
 });
 
 describe("analyzeWavBuffer decoding", () => {

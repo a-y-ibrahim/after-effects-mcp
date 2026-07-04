@@ -45,6 +45,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Removed the unused `node-fetch` dependency and replaced `copyfiles` with a Node
   one-liner in the build, eliminating both from the dependency tree and clearing
   their advisories.
+- Hardened the WAV analyzer against a crafted file: reject unsupported bit depths,
+  clamp the declared data-chunk size to the buffer, and bound `numPoints`, so a
+  malicious audio source can no longer exhaust CPU or memory on the main thread.
+- Hardened CI: least-privilege `permissions`, actions pinned to commit SHAs, and
+  `persist-credentials: false` on checkout in both workflows.
+- Added a `files` allowlist to `package.json` so only build output and docs are
+  published (no tests, coverage, or source).
 - Documented in `SECURITY.md` that the remaining `npm audit` advisories are all in
   the SDK's Express HTTP transport, which this stdio-only server never loads.
 

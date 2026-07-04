@@ -1840,6 +1840,7 @@ server.tool(
       .number()
       .int()
       .positive()
+      .max(100000)
       .optional()
       .describe("Number of amplitude samples to return (default: 200). Higher = more detail."),
   },
