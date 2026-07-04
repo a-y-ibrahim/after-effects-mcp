@@ -40,5 +40,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The published server runs on Node 18+, so we build and type-check on 18.
+      # The test runner (Vitest 4) requires Node 20+, so the suite runs on 20/22.
       - name: Test
+        if: matrix.node != '18'
         run: npm test

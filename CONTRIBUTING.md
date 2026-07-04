@@ -5,7 +5,8 @@ setup, the test workflow, and the conventions the project follows.
 
 ## Prerequisites
 
-- Node.js 18 or later
+- Node.js 18 or later to run the server; Node 20 or later to run the test suite
+  (Vitest 4 requires Node 20+)
 - Adobe After Effects 2022 or later (only needed to test against a live AE bridge)
 
 ## Local setup

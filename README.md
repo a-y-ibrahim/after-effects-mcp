@@ -115,8 +115,10 @@ npm test            # Vitest unit suite
 ```
 
 Pure logic lives in [src/lib/bridge-core.ts](src/lib/bridge-core.ts) and is unit
-tested in [tests/bridge-core.test.ts](tests/bridge-core.test.ts). CI runs the
-type-check, build, and tests on Linux, macOS, and Windows across Node 18, 20, and 22. See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture and how to add a tool.
+tested in [tests/bridge-core.test.ts](tests/bridge-core.test.ts). CI type-checks and
+builds on Linux, macOS, and Windows across Node 18, 20, and 22, and runs the test
+suite on Node 20 and 22 (Vitest 4 requires Node 20+). See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the architecture and how to add a tool.
 
 ---
 
