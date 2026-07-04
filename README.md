@@ -37,6 +37,10 @@ This is an enhanced edition built on the original work of
 ## 📋 Prerequisites
 
 - **Adobe After Effects** 2022 or later
+- **Windows or macOS.** After Effects itself only runs on these two platforms, so
+  the server is meant to run on the same machine as After Effects. The Node
+  process starts on Linux and the CI builds and tests there, but there is no After
+  Effects for it to drive.
 - **Node.js 18+** - <https://nodejs.org>
 - An MCP client (e.g. **Claude Code**: `npm install -g @anthropic-ai/claude-code`)
 
