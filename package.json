@@ -3,6 +3,18 @@
   "version": "1.6.4",
   "description": "MCP server that gives AI assistants full programmatic control of Adobe After Effects: arbitrary ExtendScript execution, background rendering, deep project/layer inspection, and native Arabic/RTL and multilingual support.",
   "main": "build/index.js",
+  "bin": {
+    "after-effects-mcp": "build/index.js"
+  },
+  "files": [
+    "build",
+    "install-bridge.js",
+    "README.md",
+    "README.ar.md",
+    "CREDITS.md",
+    "ENHANCEMENTS.md",
+    "LICENSE"
+  ],
   "type": "module",
   "author": "Abdelrahman Youssef",
   "license": "MIT",
@@ -35,7 +47,7 @@
     "build": "tsc && copyfiles -u 1 \"src/scripts/**/*\" build",
     "start": "node build/index.js",
     "install-bridge": "node install-bridge.js",
-    "postinstall": "npm run build"
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
