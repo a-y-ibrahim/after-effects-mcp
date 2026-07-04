@@ -33,7 +33,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc && copyfiles -u 1 \"src/scripts/**/*\" build",
+    "build": "npm run clean && tsc && node -e \"require('fs').cpSync('src/scripts','build/scripts',{recursive:true})\"",
     "start": "node build/index.js",
     "install-bridge": "node install-bridge.js",
     "typecheck": "tsc --noEmit",
@@ -47,15 +47,13 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "node-fetch": "^3.3.2",
+    "@modelcontextprotocol/sdk": "~1.9.0",
     "zod": "^3.22.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.17.30",
     "@vitest/coverage-v8": "^4.1.9",
-    "copyfiles": "^2.4.1",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.4",

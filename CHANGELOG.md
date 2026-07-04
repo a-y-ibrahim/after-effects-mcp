@@ -37,6 +37,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Global and production installs no longer fail: replaced the `postinstall` build
   (which needs dev dependencies) with `prepare`/`prepack`.
+- A fresh `npm install` no longer risks a broken build: the MCP SDK is pinned to a
+  range that compiles (newer releases trigger a TypeScript inference regression).
+
+### Security
+
+- Removed the unused `node-fetch` dependency and replaced `copyfiles` with a Node
+  one-liner in the build, eliminating both from the dependency tree and clearing
+  their advisories.
+- Documented in `SECURITY.md` that the remaining `npm audit` advisories are all in
+  the SDK's Express HTTP transport, which this stdio-only server never loads.
 
 ## [1.6.4] - 2026-07
 
