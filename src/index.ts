@@ -2582,6 +2582,175 @@ server.tool(
   },
 );
 
+// Read scratch PNGs listed in a bridge result into MCP image blocks, then delete
+// them. Shared by contact-sheet and match-reference.
+function imageResultFromPaths(
+  raw: string,
+  entries: Array<{ path?: string; caption: string }>,
+  headerText: string,
+): { content: ContentBlock[]; isError?: boolean } {
+  const cleanup: string[] = [];
+  try {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { content: [{ type: "text", text: raw }], isError: true };
+    }
+    if (!parsed || parsed.status === "error" || parsed.error) {
+      return bridgeToolResult(raw) as { content: ContentBlock[]; isError?: boolean };
+    }
+    const content: ContentBlock[] = [{ type: "text", text: headerText }];
+    for (const e of entries) {
+      if (!e.path) continue;
+      cleanup.push(e.path);
+      let b64: string | null = null;
+      try {
+        b64 = fs.readFileSync(e.path).toString("base64");
+      } catch {
+        b64 = null;
+      }
+      if (b64) {
+        content.push({ type: "text", text: e.caption });
+        content.push({ type: "image", data: b64, mimeType: "image/png" });
+      }
+    }
+    if (parsed.note) content.push({ type: "text", text: String(parsed.note) });
+    const anyImage = content.some((b) => b.type === "image");
+    return { content, isError: anyImage ? false : true };
+  } finally {
+    for (const p of cleanup) {
+      try {
+        fs.unlinkSync(p);
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+}
+
+server.tool(
+  "contact-sheet",
+  "See a composition's whole timeline at a glance: render N frames sampled across the duration and composite them into ONE labeled thumbnail grid, returned as a single image. Use this to perceive motion, timing, and easing cheaply (one image instead of many). Select the comp by name or 1-based index, or leave empty for the active comp.",
+  {
+    comp: z
+      .union([z.string(), z.number().int().positive()])
+      .optional()
+      .describe("Composition name or 1-based index. Omit to use the active comp."),
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .max(64)
+      .optional()
+      .describe("How many frames to sample across the duration (default 9)."),
+    maxWidth: z
+      .number()
+      .int()
+      .min(64)
+      .max(4096)
+      .optional()
+      .describe("Width of the whole grid image in pixels (default 1024)."),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(600000)
+      .optional()
+      .describe("Wait time in ms (default 90000)."),
+  },
+  async ({ comp, count = 9, maxWidth = 1024, timeoutMs = 90000 }) => {
+    try {
+      const raw = await sendBridgeCommand(
+        "contactSheet",
+        {
+          compName: typeof comp === "string" ? comp : undefined,
+          compIndex: typeof comp === "number" ? comp : undefined,
+          count,
+          maxWidth,
+        },
+        timeoutMs,
+        300,
+      );
+      let parsed: any;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return { content: [{ type: "text", text: raw }], isError: true };
+      }
+      const name = parsed?.compName || "composition";
+      return imageResultFromPaths(
+        raw,
+        [{ path: parsed?.path, caption: `Contact sheet of "${name}" (${count} frames)` }],
+        `Contact sheet of "${name}"`,
+      );
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error building contact sheet: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "match-reference",
+  "Compare a composition against a reference image: renders the current frame, then returns a side-by-side (reference vs current) AND a difference map (bright where they differ) so you can see exactly WHERE the render deviates and converge on a match. Provide the reference as an on-disk image path. Select the comp by name or 1-based index, or leave empty for the active comp.",
+  {
+    referencePath: z.string().describe("Absolute path to the reference image on disk (PNG/JPG)."),
+    comp: z
+      .union([z.string(), z.number().int().positive()])
+      .optional()
+      .describe("Composition name or 1-based index. Omit to use the active comp."),
+    time: z.number().optional().describe("Time in seconds to render (default comp midpoint)."),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(600000)
+      .optional()
+      .describe("Wait time in ms (default 90000)."),
+  },
+  async ({ referencePath, comp, time, timeoutMs = 90000 }) => {
+    try {
+      const raw = await sendBridgeCommand(
+        "matchReference",
+        {
+          referencePath,
+          compName: typeof comp === "string" ? comp : undefined,
+          compIndex: typeof comp === "number" ? comp : undefined,
+          time,
+        },
+        timeoutMs,
+        300,
+      );
+      let parsed: any;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return { content: [{ type: "text", text: raw }], isError: true };
+      }
+      const name = parsed?.compName || "composition";
+      return imageResultFromPaths(
+        raw,
+        [
+          { path: parsed?.sideBySidePath, caption: `Reference (left) vs "${name}" (right)` },
+          {
+            path: parsed?.diffPath,
+            caption: "Difference map: bright areas are where the render deviates",
+          },
+        ],
+        `Match check for "${name}" against the reference`,
+      );
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error matching reference: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 server.tool(
   "add-to-render-queue",
   "Add a composition to the After Effects render queue and configure its output. Select the comp by compName (most reliable), compIndex (1-based among compositions), or leave both empty to use the active comp. Templates must already exist in this AE installation.",

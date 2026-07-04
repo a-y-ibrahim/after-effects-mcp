@@ -24,7 +24,7 @@ After Effects بـ**أي لغة واجهة**.
 | **الموثوقية**          | معرّف لكل أمر (لا نتائج قديمة)، مجموعة تراجع واحدة لكل أمر، استطلاع أسرع، مجلد مشترك محصّن ضد OneDrive، فحص صحة `check-bridge` |
 | **إدارة الطبقات**      | كاميرات، تكرار، حذف، ماسكات، تعديل دفعي، إعدادات الكومب - كأدوات مخصّصة                                                        |
 
-**المجموع 45 أداة.** التفاصيل في [ENHANCEMENTS.md](ENHANCEMENTS.md).
+**المجموع 47 أداة.** التفاصيل في [ENHANCEMENTS.md](ENHANCEMENTS.md).
 
 ---
 
@@ -65,7 +65,7 @@ claude mcp add AfterEffectsMCP node /المسار/المطلق/إلى/after-effe
 
 ## 🧰 الأدوات بإيجاز
 
-**الفحص والتشخيص** - `see-frame`، `inspect-comp`، `inspect-layer`، `get-results`، `check-bridge`، `run-bridge-test`، `get-help`
+**الفحص والتشخيص** - `see-frame`، `contact-sheet`، `match-reference`، `inspect-comp`، `inspect-layer`، `get-results`، `check-bridge`، `run-bridge-test`، `get-help`
 **الكومبوزيشن والطبقات** - `create-composition`، `set-composition-properties`، `create-text-layer`، `create-camera`، `create-adjustment-layer`، `duplicate-layer`، `delete-layer`، `center-layers`، `set-layer-mask`، `batch-set-layer-properties`
 **التحريك** - `setLayerKeyframe`، `setLayerExpression`، `get-layer-clip-frames`
 **التأثيرات** - `apply-effect`، `add-any-effect`، `apply-effect-template`، `list-layer-effects`، `list-available-effects`، `set-effect-property`، `set-effect-keyframe`، `remove-effect`، `mcp_aftereffects_get_effects_help`

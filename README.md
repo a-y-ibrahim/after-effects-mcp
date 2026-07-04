@@ -30,7 +30,7 @@ This is an enhanced edition built on the original work of
 | **Reliability**              | Per‑command IDs (no stale results), one undo group per command, faster polling, OneDrive‑proof shared folder, `check-bridge` health/version check |
 | **Layer management**         | Cameras, duplicate, delete, masks, batch transform, comp settings - as dedicated tools                                                            |
 
-**45 tools total.** Full details in [ENHANCEMENTS.md](ENHANCEMENTS.md).
+**47 tools total.** Full details in [ENHANCEMENTS.md](ENHANCEMENTS.md).
 
 ---
 
@@ -71,7 +71,7 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 
 ## 🧰 Tools at a glance
 
-**Inspection & diagnostics** - `see-frame`, `inspect-comp`, `inspect-layer`, `get-results`, `check-bridge`, `run-bridge-test`, `get-help`
+**Inspection & diagnostics** - `see-frame`, `contact-sheet`, `match-reference`, `inspect-comp`, `inspect-layer`, `get-results`, `check-bridge`, `run-bridge-test`, `get-help`
 **Composition & layers** - `create-composition`, `set-composition-properties`, `create-text-layer`, `create-camera`, `create-adjustment-layer`, `duplicate-layer`, `delete-layer`, `center-layers`, `set-layer-mask`, `batch-set-layer-properties`
 **Animation** - `setLayerKeyframe`, `setLayerExpression`, `get-layer-clip-frames`
 **Effects** - `apply-effect`, `add-any-effect`, `apply-effect-template`, `list-layer-effects`, `list-available-effects`, `set-effect-property`, `set-effect-keyframe`, `remove-effect`, `mcp_aftereffects_get_effects_help`
@@ -82,7 +82,7 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 
 For project/comp overview you can also use `run-script` with `getProjectInfo` / `listCompositions`.
 
-📖 Full reference: [docs/TOOLS.md](docs/TOOLS.md) (all 45 tools) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the bridge works).
+📖 Full reference: [docs/TOOLS.md](docs/TOOLS.md) (all 47 tools) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the bridge works).
 
 ---
 

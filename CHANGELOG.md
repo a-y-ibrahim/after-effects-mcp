@@ -14,6 +14,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by default to stay fast and cheap; `maxWidth: 0` gives a native-resolution still.
   No other After Effects MCP returns rendered pixels. Bumps the bridge protocol to
   `1.7.0-mcp-enhanced`; the pure Node-side logic is unit tested.
+- **`contact-sheet`**: sample N frames across a comp's duration and let After
+  Effects composite them into one labeled thumbnail grid image, so motion, timing,
+  and easing are visible at a glance and cheaply.
+- **`match-reference`**: compare a comp to an on-disk reference image, returning a
+  side-by-side and a difference map (via AE's Difference blend, no external
+  library) so the model can see where the render deviates and converge on a match.
 
 - Unit test suite (Vitest, 53 tests) covering bridge result parsing, atomic
   writes, preset path resolution, command-id generation, platform path helpers,

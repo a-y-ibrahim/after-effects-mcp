@@ -4,6 +4,8 @@ import {
   downscaleDims,
   scratchFramePath,
   buildFrameContent,
+  sampleTimes,
+  gridLayout,
 } from "../src/lib/see-frame";
 
 describe("normalizeTimes", () => {
@@ -71,6 +73,42 @@ describe("scratchFramePath", () => {
   it("sanitizes the command id and handles trailing separators", () => {
     const p = scratchFramePath("/tmp/bridge/", "a/b:c 1", 2);
     expect(p).toBe("/tmp/bridge/__mcp_seeframe_abc1_2.png");
+  });
+});
+
+describe("sampleTimes", () => {
+  it("returns N segment-midpoints inside (0, duration)", () => {
+    const t = sampleTimes(10, 4);
+    expect(t).toHaveLength(4);
+    expect(t[0]).toBeGreaterThan(0);
+    expect(t[t.length - 1]).toBeLessThan(10);
+    // evenly spaced midpoints: 1.25, 3.75, 6.25, 8.75
+    expect(t).toEqual([1.25, 3.75, 6.25, 8.75]);
+  });
+
+  it("clamps count into [1, 64]", () => {
+    expect(sampleTimes(10, 0)).toHaveLength(1);
+    expect(sampleTimes(10, 999)).toHaveLength(64);
+  });
+
+  it("handles a zero/invalid duration without NaN", () => {
+    expect(sampleTimes(0, 3)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("gridLayout", () => {
+  it("picks a near-square grid that fits all cells", () => {
+    expect(gridLayout(4)).toEqual({ cols: 2, rows: 2 });
+    expect(gridLayout(6)).toEqual({ cols: 3, rows: 2 });
+    expect(gridLayout(9)).toEqual({ cols: 3, rows: 3 });
+    expect(gridLayout(1)).toEqual({ cols: 1, rows: 1 });
+  });
+
+  it("always has enough cells for the count", () => {
+    for (let n = 1; n <= 30; n++) {
+      const g = gridLayout(n);
+      expect(g.cols * g.rows).toBeGreaterThanOrEqual(n);
+    }
   });
 });
 

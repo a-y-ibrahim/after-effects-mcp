@@ -76,6 +76,33 @@ export function scratchFramePath(dir: string, commandId: string, index: number):
 }
 
 /**
+ * Sample N evenly-spaced times across [0, duration] for a contact sheet. Returns
+ * the midpoints of N equal segments (so no frame sits exactly at t=0 or t=dur,
+ * which often render empty at the very edges). count is clamped to [1, 64].
+ */
+export function sampleTimes(duration: number, count: number): number[] {
+  const dur = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const n = Math.min(Math.max(1, Math.floor(count || 1)), 64);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (dur * (i + 0.5)) / n;
+    out.push(Math.round(t * 1e6) / 1e6);
+  }
+  return out;
+}
+
+/**
+ * Choose a near-square grid (cols x rows) that fits `count` cells, preferring a
+ * slightly wider layout (landscape reads better). rows*cols is always >= count.
+ */
+export function gridLayout(count: number): { cols: number; rows: number } {
+  const n = Math.max(1, Math.floor(count || 1));
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  return { cols, rows };
+}
+
+/**
  * Build the MCP content[] array from captured frames. Each frame becomes a short
  * text caption followed by its image block; an optional trailing state block
  * carries the inspect-comp JSON so the model reasons over pixels + DOM together.

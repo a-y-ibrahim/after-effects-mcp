@@ -1,6 +1,6 @@
 # Tool Reference
 
-The server exposes **45 tools**. Each tool's full input schema (parameter names,
+The server exposes **47 tools**. Each tool's full input schema (parameter names,
 types, and which are required) is self-described through MCP, so your client shows
 it inline. This page is the grouped catalog with each tool's purpose.
 
@@ -11,6 +11,8 @@ When something times out or behaves oddly, run **`check-bridge`** first.
 | Tool              | Purpose                                                                                                                                                                                                                            |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `see-frame`       | Render one or more frames of a comp and return them as images so the AI can visually verify and self-correct. Downscaled previews by default (maxWidth 512); `maxWidth: 0` for a native-resolution still. Optional `includeState`. |
+| `contact-sheet`   | Render N frames sampled across the duration and composite them into ONE labeled thumbnail grid image, so you perceive motion/timing/easing at a glance and cheaply.                                                                |
+| `match-reference` | Compare a comp to an on-disk reference image: returns a side-by-side and a difference map (bright where they differ) so you can see exactly where the render deviates and converge on a match.                                     |
 | `inspect-comp`    | Map a whole composition: settings plus every layer with a useful summary (index, id, name, type, flags, in/out/start, parent, blend mode, effect/mask counts, has-audio). Use it to navigate, then `inspect-layer` for detail.     |
 | `inspect-layer`   | Deeply inspect one layer before precise edits: type, flags, in/out, parent, blend mode, 3D; the full Transform group (values, expressions, keyframes); effects; masks; markers; source; and text.                                  |
 | `get-results`     | Get results from the last script executed in After Effects.                                                                                                                                                                        |

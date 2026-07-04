@@ -2873,6 +2873,150 @@ function seeFrame(args) {
     }
 }
 
+// contact-sheet: render N frames sampled across the comp and let AE itself
+// composite them into ONE labeled thumbnail grid. Every temp comp / imported
+// footage / scratch PNG is tracked and removed, so the user's project is never
+// polluted.
+function contactSheet(args) {
+    var gridComp = null;
+    var importedItems = [];
+    var scratch = [];
+    try {
+        _sweepMcpTempComps();
+        var comp = _resolveComp(args);
+        if (!comp) return JSON.stringify({ status: "error", error: "Composition not found." });
+
+        var count = (args && typeof args.count === "number") ? Math.round(args.count) : 9;
+        if (count < 1) count = 1; if (count > 64) count = 64;
+        var sheetW = (args && typeof args.maxWidth === "number") ? args.maxWidth : 1024;
+        if (sheetW < 64) sheetW = 64;
+
+        var folder = getBridgeFolder().fsName;
+        var dur = comp.duration;
+
+        // near-square grid
+        var cols = Math.ceil(Math.sqrt(count));
+        var rows = Math.ceil(count / cols);
+
+        var cellW = Math.round((sheetW / cols) / 2) * 2; if (cellW < 2) cellW = 2;
+        var cellH = Math.round((cellW * comp.height / comp.width) / 2) * 2; if (cellH < 2) cellH = 2;
+        var gw = cellW * cols;
+        var gh = cellH * rows;
+
+        gridComp = app.project.items.addComp("__mcp_tmp__contact", gw, gh, 1, 1, comp.frameRate);
+
+        for (var i = 0; i < count; i++) {
+            _seeFrameSeq++;
+            var t = (dur * (i + 0.5)) / count;
+            var pngPath = folder + "/__mcp_cs_" + _seeFrameSeq + "_" + i + ".png";
+            comp.saveFrameToPng(t, new File(pngPath));
+            scratch.push(pngPath);
+
+            var io = new ImportOptions(new File(pngPath));
+            var foot = app.project.importFile(io);
+            importedItems.push(foot);
+
+            var lyr = gridComp.layers.add(foot);
+            var col = i % cols;
+            var row = Math.floor(i / cols);
+            var sx = (cellW / comp.width) * 100;
+            lyr.property("ADBE Transform Group").property("ADBE Scale").setValue([sx, sx]);
+            lyr.property("ADBE Transform Group").property("ADBE Position").setValue([col * cellW + cellW / 2, row * cellH + cellH / 2]);
+
+            // tiny timecode label in the cell corner
+            try {
+                var tl = gridComp.layers.addText((Math.round(t * 100) / 100) + "s");
+                var td = tl.property("ADBE Text Properties").property("ADBE Text Document").value;
+                td.fontSize = Math.max(10, Math.round(cellH * 0.12));
+                td.fillColor = [1, 1, 1];
+                tl.property("ADBE Text Properties").property("ADBE Text Document").setValue(td);
+                tl.property("ADBE Transform Group").property("ADBE Position").setValue([col * cellW + 6, row * cellH + cellH - 6]);
+            } catch (te) {}
+        }
+
+        _seeFrameSeq++;
+        var outPath = folder + "/__mcp_cs_grid_" + _seeFrameSeq + ".png";
+        gridComp.saveFrameToPng(0, new File(outPath));
+
+        return JSON.stringify({ status: "success", compName: comp.name, path: outPath, count: count });
+    } catch (e) {
+        return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) });
+    } finally {
+        if (gridComp) { try { gridComp.remove(); } catch (ge) {} }
+        for (var k = 0; k < importedItems.length; k++) { try { importedItems[k].remove(); } catch (ie) {} }
+        for (var s = 0; s < scratch.length; s++) { try { var f = new File(scratch[s]); if (f.exists) f.remove(); } catch (se) {} }
+    }
+}
+
+// match-reference: import an on-disk reference image, render the current comp
+// frame, and use AE's DIFFERENCE blend mode as a dependency-free diff engine.
+// Returns a side-by-side PNG and a difference-map PNG.
+function matchReference(args) {
+    var sbsComp = null, diffComp = null;
+    var importedItems = [];
+    var scratch = [];
+    try {
+        _sweepMcpTempComps();
+        var comp = _resolveComp(args);
+        if (!comp) return JSON.stringify({ status: "error", error: "Composition not found." });
+        if (!args || !args.referencePath) return JSON.stringify({ status: "error", error: "referencePath is required." });
+
+        var refFile = new File(args.referencePath);
+        if (!refFile.exists) return JSON.stringify({ status: "error", error: "Reference image not found: " + args.referencePath });
+
+        var folder = getBridgeFolder().fsName;
+        var t = (typeof args.time === "number") ? args.time : comp.duration / 2;
+        if (t < 0) t = 0; if (t > comp.duration) t = comp.duration;
+
+        // Render the current comp frame and import it + the reference as footage.
+        _seeFrameSeq++;
+        var curPath = folder + "/__mcp_mr_cur_" + _seeFrameSeq + ".png";
+        comp.saveFrameToPng(t, new File(curPath));
+        scratch.push(curPath);
+
+        var refFoot = app.project.importFile(new ImportOptions(refFile));
+        importedItems.push(refFoot);
+        var curFoot = app.project.importFile(new ImportOptions(new File(curPath)));
+        importedItems.push(curFoot);
+
+        var rw = refFoot.width, rh = refFoot.height;
+
+        // (1) side-by-side (reference | current), each scaled into half width.
+        sbsComp = app.project.items.addComp("__mcp_tmp__sbs", rw * 2, rh, 1, 1, comp.frameRate);
+        var rL = sbsComp.layers.add(refFoot);
+        rL.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
+        var cR = sbsComp.layers.add(curFoot);
+        var csx = (rw / curFoot.width) * 100, csy = (rh / curFoot.height) * 100;
+        cR.property("ADBE Transform Group").property("ADBE Scale").setValue([csx, csy]);
+        cR.property("ADBE Transform Group").property("ADBE Position").setValue([rw + rw / 2, rh / 2]);
+        _seeFrameSeq++;
+        var sbsPath = folder + "/__mcp_mr_sbs_" + _seeFrameSeq + ".png";
+        sbsComp.saveFrameToPng(0, new File(sbsPath));
+
+        // (2) difference map: current over reference at reference size, DIFFERENCE blend.
+        diffComp = app.project.items.addComp("__mcp_tmp__diff", rw, rh, 1, 1, comp.frameRate);
+        var dRef = diffComp.layers.add(refFoot);
+        dRef.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
+        var dCur = diffComp.layers.add(curFoot);
+        var dsx = (rw / curFoot.width) * 100, dsy = (rh / curFoot.height) * 100;
+        dCur.property("ADBE Transform Group").property("ADBE Scale").setValue([dsx, dsy]);
+        dCur.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
+        try { dCur.blendingMode = BlendingMode.DIFFERENCE; } catch (be) {}
+        _seeFrameSeq++;
+        var diffPath = folder + "/__mcp_mr_diff_" + _seeFrameSeq + ".png";
+        diffComp.saveFrameToPng(0, new File(diffPath));
+
+        return JSON.stringify({ status: "success", compName: comp.name, sideBySidePath: sbsPath, diffPath: diffPath });
+    } catch (e) {
+        return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) });
+    } finally {
+        if (sbsComp) { try { sbsComp.remove(); } catch (e1) {} }
+        if (diffComp) { try { diffComp.remove(); } catch (e2) {} }
+        for (var k = 0; k < importedItems.length; k++) { try { importedItems[k].remove(); } catch (ie) {} }
+        for (var s = 0; s < scratch.length; s++) { try { var f = new File(scratch[s]); if (f.exists) f.remove(); } catch (se) {} }
+    }
+}
+
 // Deep inspector: everything you need to SEE before precisely editing a layer.
 function getLayerFull(args) {
     try {
@@ -3157,7 +3301,9 @@ function executeCommand(command, args) {
         "startRender": true,
         "addToRenderQueue": true,
         "manageRenderQueue": true,
-        "seeFrame": true
+        "seeFrame": true,
+        "contactSheet": true,
+        "matchReference": true
     };
     var useUndoGroup = !READ_ONLY_COMMANDS[command] && !NO_UNDO_GROUP_COMMANDS[command];
     // Suppress any AE modal for the whole execution so a dialog can never block the
@@ -3303,6 +3449,16 @@ function executeCommand(command, args) {
                 logToPanel("Calling seeFrame function...");
                 result = seeFrame(args);
                 logToPanel("Returned from seeFrame.");
+                break;
+            case "contactSheet":
+                logToPanel("Calling contactSheet function...");
+                result = contactSheet(args);
+                logToPanel("Returned from contactSheet.");
+                break;
+            case "matchReference":
+                logToPanel("Calling matchReference function...");
+                result = matchReference(args);
+                logToPanel("Returned from matchReference.");
                 break;
             case "getLayerFull":
                 logToPanel("Calling getLayerFull function...");
