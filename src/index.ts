@@ -18,6 +18,7 @@ import {
 } from "./lib/bridge-core.js";
 import { collectPresetFiles } from "./lib/preset-scan.js";
 import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
+import { buildFrameContent, type FrameFile, type ContentBlock } from "./lib/see-frame.js";
 
 const server = new McpServer({
   name: "AfterEffectsServer",
@@ -1955,7 +1956,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.6.4-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.7.0-mcp-enhanced";
 
 server.tool(
   "check-bridge",
@@ -2461,6 +2462,122 @@ server.tool(
         content: [{ type: "text", text: `Error executing script: ${String(error)}` }],
         isError: true,
       };
+    }
+  },
+);
+
+server.tool(
+  "see-frame",
+  "SEE what a composition actually looks like: render one or more frames to images and return them so you can visually verify and self-correct (make a change, look, fix). Use this after edits to catch problems the DOM does not reveal - clipped or empty text, blown-out glow, off-frame layers, wrong colors, or Arabic/RTL text that did not shape correctly. Select the comp by name or 1-based index, or leave empty for the active comp. Returns downscaled preview images by default (maxWidth 512) to keep it fast and cheap; pass maxWidth 0 for a native-resolution still. Note: a still is a still - time-based effects like motion blur may look different from playback.",
+  {
+    comp: z
+      .union([z.string(), z.number().int().positive()])
+      .optional()
+      .describe("Composition name or 1-based index. Omit to use the active comp."),
+    times: z
+      .union([z.number(), z.array(z.number())])
+      .optional()
+      .describe(
+        "Time(s) in seconds to capture. A single number or an array. Defaults to the comp midpoint. Out-of-range values are clamped.",
+      ),
+    maxWidth: z
+      .number()
+      .int()
+      .min(0)
+      .max(4096)
+      .optional()
+      .describe(
+        "Max preview width in pixels (default 512, aspect preserved). Use 0 for a guaranteed-faithful native-resolution frame.",
+      ),
+    includeState: z
+      .boolean()
+      .optional()
+      .describe(
+        "Also return the comp's structured state (like inspect-comp) alongside the images.",
+      ),
+    motionBlur: z
+      .boolean()
+      .optional()
+      .describe("Render the still with motion blur enabled (default false)."),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(600000)
+      .optional()
+      .describe("How long to wait for the render, in milliseconds (default 60000)."),
+  },
+  async ({
+    comp,
+    times,
+    maxWidth = 512,
+    includeState = false,
+    motionBlur = false,
+    timeoutMs = 60000,
+  }) => {
+    const scratchPaths: string[] = [];
+    try {
+      const raw = await sendBridgeCommand(
+        "seeFrame",
+        {
+          compName: typeof comp === "string" ? comp : undefined,
+          compIndex: typeof comp === "number" ? comp : undefined,
+          times: times === undefined ? undefined : Array.isArray(times) ? times : [times],
+          maxWidth,
+          includeState,
+          motionBlur,
+        },
+        timeoutMs,
+        250,
+      );
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return { content: [{ type: "text", text: raw }], isError: true };
+      }
+      if (!parsed || parsed.status === "error" || parsed.error) {
+        return bridgeToolResult(raw);
+      }
+
+      const frames: FrameFile[] = Array.isArray(parsed.frames) ? parsed.frames : [];
+      for (const f of frames) if (f && f.path) scratchPaths.push(f.path);
+
+      const compName: string = parsed.compName || (typeof comp === "string" ? comp : "composition");
+      const stateJson: string | undefined =
+        includeState && parsed.state !== undefined
+          ? typeof parsed.state === "string"
+            ? parsed.state
+            : JSON.stringify(parsed.state)
+          : undefined;
+
+      const readBase64 = (p: string): string | null => {
+        try {
+          return fs.readFileSync(p).toString("base64");
+        } catch {
+          return null;
+        }
+      };
+
+      const content: ContentBlock[] = buildFrameContent(compName, frames, readBase64, stateJson);
+      if (parsed.note) content.push({ type: "text", text: String(parsed.note) });
+      const anyImage = content.some((b) => b.type === "image");
+      return { content, isError: anyImage ? false : true };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error capturing frame: ${String(error)}` }],
+        isError: true,
+      };
+    } finally {
+      // Clean up the scratch PNGs; the bytes are already in the response.
+      for (const p of scratchPaths) {
+        try {
+          fs.unlinkSync(p);
+        } catch {
+          /* already gone */
+        }
+      }
     }
   },
 );

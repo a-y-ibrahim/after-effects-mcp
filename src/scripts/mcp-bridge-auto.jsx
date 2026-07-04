@@ -2281,7 +2281,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.6.4-mcp-enhanced";
+var BRIDGE_VERSION = "1.7.0-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -2781,6 +2781,98 @@ function getCompFull(args) {
     }
 }
 
+// Monotonic counter for unique scratch PNG names (bridge is serial, but this
+// avoids any collision with a leftover from a previously crashed call).
+var _seeFrameSeq = 0;
+
+// Remove any leftover "__mcp_tmp__" comps from a previous crashed seeFrame call
+// so the user's project is never polluted with our temporaries.
+function _sweepMcpTempComps() {
+    try {
+        for (var i = app.project.numItems; i >= 1; i--) {
+            var it = app.project.item(i);
+            if (it instanceof CompItem && it.name.indexOf("__mcp_tmp__") === 0) {
+                try { it.remove(); } catch (e) {}
+            }
+        }
+    } catch (e) {}
+}
+
+// see-frame: render one or more frames of a comp to PNG and return their paths so
+// the Node side can hand the actual pixels back to the model. Renders a downscaled
+// nested comp when maxWidth < comp.width, so AE performs the downscale before any
+// pixels leave the app.
+function seeFrame(args) {
+    var tempComp = null;
+    try {
+        _sweepMcpTempComps();
+
+        var comp = _resolveComp(args);
+        if (!comp) {
+            return JSON.stringify({ status: "error", error: "Composition not found. Provide compName or compIndex, or open a comp." });
+        }
+
+        var dur = comp.duration;
+        // Build the list of capture times (clamp into [0, duration]).
+        var times = [];
+        if (args && args.times && args.times.length) {
+            for (var t = 0; t < args.times.length; t++) {
+                var tv = args.times[t];
+                if (typeof tv === "number" && !isNaN(tv)) {
+                    if (tv < 0) tv = 0;
+                    if (tv > dur) tv = dur;
+                    times.push(tv);
+                }
+            }
+        }
+        if (!times.length) times = [dur / 2];
+
+        var maxWidth = (args && typeof args.maxWidth === "number") ? args.maxWidth : 512;
+        var motionBlur = !!(args && args.motionBlur);
+
+        // Pick the render target: the comp itself, or a temp downscale comp nesting it.
+        var target = comp;
+        if (maxWidth > 0 && maxWidth < comp.width) {
+            var tw = Math.round(maxWidth / 2) * 2; if (tw < 2) tw = 2;
+            var th = Math.round((comp.height * tw / comp.width) / 2) * 2; if (th < 2) th = 2;
+            tempComp = app.project.items.addComp("__mcp_tmp__seeframe", tw, th, 1, comp.duration, comp.frameRate);
+            var nested = tempComp.layers.add(comp);
+            var scalePct = (tw / comp.width) * 100;
+            try { nested.property("ADBE Transform Group").property("ADBE Scale").setValue([scalePct, scalePct]); } catch (e) {}
+            try { nested.property("ADBE Transform Group").property("ADBE Position").setValue([tw / 2, th / 2]); } catch (e) {}
+            try { nested.collapseTransformation = true; } catch (e) {}
+            target = tempComp;
+        }
+        try { target.motionBlur = motionBlur; } catch (e) {}
+
+        var folder = getBridgeFolder().fsName;
+        var frames = [];
+        var note = null;
+        for (var i = 0; i < times.length; i++) {
+            _seeFrameSeq++;
+            var path = folder + "/__mcp_seeframe_" + _seeFrameSeq + "_" + i + ".png";
+            try {
+                target.saveFrameToPng(times[i], new File(path));
+                frames.push({ time: times[i], path: path, w: target.width, h: target.height });
+            } catch (fe) {
+                note = (note ? note + " " : "") + "Frame at t=" + times[i] + "s failed: " + fe.toString();
+            }
+        }
+
+        var out = { status: "success", compName: comp.name, frames: frames };
+        if (note) out.note = note;
+        if (args && args.includeState) {
+            try { out.state = getCompFull({ compName: comp.name }); } catch (se) {}
+        }
+        if (!frames.length) { out.status = "error"; out.error = note || "No frames could be rendered."; }
+        return JSON.stringify(out);
+    } catch (e) {
+        return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) });
+    } finally {
+        if (tempComp) { try { tempComp.remove(); } catch (ce) {} }
+    }
+}
+
 // Deep inspector: everything you need to SEE before precisely editing a layer.
 function getLayerFull(args) {
     try {
@@ -3064,7 +3156,8 @@ function executeCommand(command, args) {
         "executeScript": true,
         "startRender": true,
         "addToRenderQueue": true,
-        "manageRenderQueue": true
+        "manageRenderQueue": true,
+        "seeFrame": true
     };
     var useUndoGroup = !READ_ONLY_COMMANDS[command] && !NO_UNDO_GROUP_COMMANDS[command];
     // Suppress any AE modal for the whole execution so a dialog can never block the
@@ -3205,6 +3298,11 @@ function executeCommand(command, args) {
                 logToPanel("Calling executeScript function...");
                 result = executeScript(args);
                 logToPanel("Returned from executeScript.");
+                break;
+            case "seeFrame":
+                logToPanel("Calling seeFrame function...");
+                result = seeFrame(args);
+                logToPanel("Returned from seeFrame.");
                 break;
             case "getLayerFull":
                 logToPanel("Calling getLayerFull function...");

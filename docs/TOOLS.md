@@ -1,6 +1,6 @@
 # Tool Reference
 
-The server exposes **44 tools**. Each tool's full input schema (parameter names,
+The server exposes **45 tools**. Each tool's full input schema (parameter names,
 types, and which are required) is self-described through MCP, so your client shows
 it inline. This page is the grouped catalog with each tool's purpose.
 
@@ -8,14 +8,15 @@ When something times out or behaves oddly, run **`check-bridge`** first.
 
 ## Inspection & diagnostics
 
-| Tool              | Purpose                                                                                                                                                                                                                        |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `inspect-comp`    | Map a whole composition: settings plus every layer with a useful summary (index, id, name, type, flags, in/out/start, parent, blend mode, effect/mask counts, has-audio). Use it to navigate, then `inspect-layer` for detail. |
-| `inspect-layer`   | Deeply inspect one layer before precise edits: type, flags, in/out, parent, blend mode, 3D; the full Transform group (values, expressions, keyframes); effects; masks; markers; source; and text.                              |
-| `get-results`     | Get results from the last script executed in After Effects.                                                                                                                                                                    |
-| `check-bridge`    | Health check: verify the panel is open and responding, report bridge/AE versions, the shared folder, and the open project/active comp. Flags a version mismatch.                                                               |
-| `run-bridge-test` | Run the bridge test script to verify communication and apply test effects.                                                                                                                                                     |
-| `get-help`        | Get help on using the After Effects MCP integration.                                                                                                                                                                           |
+| Tool              | Purpose                                                                                                                                                                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `see-frame`       | Render one or more frames of a comp and return them as images so the AI can visually verify and self-correct. Downscaled previews by default (maxWidth 512); `maxWidth: 0` for a native-resolution still. Optional `includeState`. |
+| `inspect-comp`    | Map a whole composition: settings plus every layer with a useful summary (index, id, name, type, flags, in/out/start, parent, blend mode, effect/mask counts, has-audio). Use it to navigate, then `inspect-layer` for detail.     |
+| `inspect-layer`   | Deeply inspect one layer before precise edits: type, flags, in/out, parent, blend mode, 3D; the full Transform group (values, expressions, keyframes); effects; masks; markers; source; and text.                                  |
+| `get-results`     | Get results from the last script executed in After Effects.                                                                                                                                                                        |
+| `check-bridge`    | Health check: verify the panel is open and responding, report bridge/AE versions, the shared folder, and the open project/active comp. Flags a version mismatch.                                                                   |
+| `run-bridge-test` | Run the bridge test script to verify communication and apply test effects.                                                                                                                                                         |
+| `get-help`        | Get help on using the After Effects MCP integration.                                                                                                                                                                               |
 
 ## Composition & layers
 

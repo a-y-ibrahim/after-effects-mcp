@@ -8,6 +8,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`see-frame`** (flagship): render one or more frames of a composition and return
+  them to the model as images, so an AI assistant can visually verify its work and
+  self-correct (make a change, look, fix). Downscales previews inside After Effects
+  by default to stay fast and cheap; `maxWidth: 0` gives a native-resolution still.
+  No other After Effects MCP returns rendered pixels. Bumps the bridge protocol to
+  `1.7.0-mcp-enhanced`; the pure Node-side logic is unit tested.
+
 - Unit test suite (Vitest, 53 tests) covering bridge result parsing, atomic
   writes, preset path resolution, command-id generation, platform path helpers,
   the `.ffx` preset scanner, and WAV amplitude analysis, with scoped v8 coverage
