@@ -3,14 +3,20 @@
   "version": "1.7.1",
   "description": "MCP server that gives AI assistants deep programmatic control of Adobe After Effects: arbitrary ExtendScript execution, background rendering, deep project/layer inspection, and native Arabic/RTL and multilingual support.",
   "main": "build/index.js",
+  "bin": {
+    "after-effects-mcp": "build/index.js"
+  },
   "files": [
     "build/",
     "install-bridge.js",
     "docs/",
+    "README.md",
     "README.ar.md",
     "CREDITS.md",
+    "ENHANCEMENTS.md",
     "SECURITY.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "type": "module",
   "author": "Abdelrahman Youssef",
