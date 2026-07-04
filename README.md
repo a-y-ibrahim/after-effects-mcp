@@ -62,7 +62,7 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 ```
 
 **First test:** ask your client to _“check the After Effects bridge”_. It should report
-`bridgeVersion: 1.7.0-mcp-enhanced` and `versionMatch: true`.
+`bridgeVersion: 1.7.1-mcp-enhanced` and `versionMatch: true`.
 
 > 💡 If you edit the server, re‑run `npm run build`, then restart the MCP client.
 > If you edit the bridge, also re‑run `npm run install-bridge` and restart After Effects.

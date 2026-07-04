@@ -1,6 +1,6 @@
 {
   "name": "after-effects-mcp",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "MCP server that gives AI assistants deep programmatic control of Adobe After Effects: arbitrary ExtendScript execution, background rendering, deep project/layer inspection, and native Arabic/RTL and multilingual support.",
   "main": "build/index.js",
   "files": [

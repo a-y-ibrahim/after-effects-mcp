@@ -2281,7 +2281,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.7.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.7.1-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -2798,6 +2798,23 @@ function _sweepMcpTempComps() {
     } catch (e) {}
 }
 
+// Import a file, retrying briefly. saveFrameToPng writes a PNG synchronously, but
+// on Windows the OS write-lock/flush can lag, so an immediate importFile fails
+// with "File exists but couldn't be open for reading". A short retry loop lets the
+// lock release. Only used for PNGs we just wrote (contact-sheet / match-reference).
+function _importWithRetry(file) {
+    var lastErr = null;
+    for (var attempt = 0; attempt < 10; attempt++) {
+        try {
+            return app.project.importFile(new ImportOptions(file));
+        } catch (e) {
+            lastErr = e;
+            $.sleep(150);
+        }
+    }
+    throw lastErr;
+}
+
 // see-frame: render one or more frames of a comp to PNG and return their paths so
 // the Node side can hand the actual pixels back to the model. Renders a downscaled
 // nested comp when maxWidth < comp.width, so AE performs the downscale before any
@@ -2912,8 +2929,7 @@ function contactSheet(args) {
             comp.saveFrameToPng(t, new File(pngPath));
             scratch.push(pngPath);
 
-            var io = new ImportOptions(new File(pngPath));
-            var foot = app.project.importFile(io);
+            var foot = _importWithRetry(new File(pngPath));
             importedItems.push(foot);
 
             var lyr = gridComp.layers.add(foot);
@@ -2974,9 +2990,9 @@ function matchReference(args) {
         comp.saveFrameToPng(t, new File(curPath));
         scratch.push(curPath);
 
-        var refFoot = app.project.importFile(new ImportOptions(refFile));
+        var refFoot = _importWithRetry(refFile);
         importedItems.push(refFoot);
-        var curFoot = app.project.importFile(new ImportOptions(new File(curPath)));
+        var curFoot = _importWithRetry(new File(curPath));
         importedItems.push(curFoot);
 
         var rw = refFoot.width, rh = refFoot.height;

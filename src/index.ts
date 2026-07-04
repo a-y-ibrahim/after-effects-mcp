@@ -1956,7 +1956,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.7.0-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.7.1-mcp-enhanced";
 
 server.tool(
   "check-bridge",

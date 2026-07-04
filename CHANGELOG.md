@@ -21,6 +21,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side-by-side and a difference map (via AE's Difference blend, no external
   library) so the model can see where the render deviates and converge on a match.
 
+### Fixed
+
+- `contact-sheet` and `match-reference` could fail importing a frame they had just
+  rendered ("File exists but couldn't be opened") because the OS write-lock had not
+  released yet. They now retry the import briefly. Bridge protocol `1.7.1-mcp-enhanced`.
+
 - Unit test suite (Vitest, 53 tests) covering bridge result parsing, atomic
   writes, preset path resolution, command-id generation, platform path helpers,
   the `.ffx` preset scanner, and WAV amplitude analysis, with scoped v8 coverage
