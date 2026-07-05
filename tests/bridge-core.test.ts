@@ -11,6 +11,8 @@ import {
   resolveBridgeDir,
   aerenderCandidates,
   tail,
+  nextPollDelay,
+  POLL_START_MS,
 } from "../src/lib/bridge-core";
 
 describe("bridgeToolResult", () => {
@@ -217,6 +219,34 @@ describe("aerenderCandidates", () => {
     expect(c[0]).toContain("Applications");
     expect(c.some((p) => p.endsWith("aerender"))).toBe(true);
     expect(c.some((p) => p.includes("aerender.exe"))).toBe(false);
+  });
+});
+
+describe("nextPollDelay", () => {
+  it("grows the delay by the factor each step", () => {
+    expect(nextPollDelay(40, 250)).toBe(60); // 40 * 1.5
+    expect(nextPollDelay(60, 250)).toBe(90);
+  });
+
+  it("never exceeds the cap", () => {
+    expect(nextPollDelay(200, 250)).toBe(250); // 300 capped to 250
+    expect(nextPollDelay(250, 250)).toBe(250);
+  });
+
+  it("always advances by at least 1ms", () => {
+    expect(nextPollDelay(0, 250)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("backs off from the fast start to the cap in a bounded number of steps", () => {
+    let d = POLL_START_MS;
+    const cap = 250;
+    let steps = 0;
+    while (d < cap && steps < 100) {
+      d = nextPollDelay(d, cap);
+      steps++;
+    }
+    expect(d).toBe(cap);
+    expect(steps).toBeLessThan(10); // reaches the cap quickly
   });
 });
 

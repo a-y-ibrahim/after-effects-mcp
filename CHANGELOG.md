@@ -21,6 +21,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side-by-side and a difference map (via AE's Difference blend, no external
   library) so the model can see where the render deviates and converge on a match.
 
+### Changed
+
+- Faster bridge round-trips: the server now polls the result file with an adaptive
+  backoff (starting at 40ms) instead of a fixed 250ms, and the panel checks for
+  commands every 250ms instead of 500ms. This lowers per-command latency, which
+  adds up over multi-step builds. It only changes how often the two sides check for
+  each other; it does not affect what After Effects renders. Bridge protocol
+  `1.7.2-mcp-enhanced`.
+
 ### Fixed
 
 - `contact-sheet` and `match-reference` could fail importing a frame they had just

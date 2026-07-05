@@ -196,6 +196,21 @@ export function tail(s: string, maxChars: number = 4000): string {
   return s.length > maxChars ? s.slice(s.length - maxChars) : s;
 }
 
+/** Smallest gap between result-file polls, in ms (the fast first checks). */
+export const POLL_START_MS = 40;
+
+/**
+ * Compute the next result-poll delay with exponential backoff, capped. Starting
+ * small (POLL_START_MS) makes quick commands return in tens of ms instead of
+ * waiting a fixed interval, while long waits back off to `cap` so the loop never
+ * busy-spins. This affects only how often the server CHECKS for a result; it does
+ * not change what After Effects renders, so output quality is untouched.
+ */
+export function nextPollDelay(current: number, cap: number, factor: number = 1.5): number {
+  const next = Math.ceil(current * factor);
+  return Math.min(Math.max(next, 1), cap);
+}
+
 /**
  * Create a monotonic command-id generator. Each call to the returned function
  * yields a unique, strictly increasing id of the form `${now}-${seq}` so the

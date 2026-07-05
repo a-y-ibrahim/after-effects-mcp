@@ -16,6 +16,8 @@ import {
   resolveBridgeDir,
   aerenderCandidates,
   tail,
+  nextPollDelay,
+  POLL_START_MS,
 } from "./lib/bridge-core.js";
 import { collectPresetFiles } from "./lib/preset-scan.js";
 import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
@@ -103,6 +105,9 @@ async function waitForBridgeResult(
   const start = Date.now();
   const resultPath = path.join(getAETempDir(), "ae_mcp_result.json");
   let lastSize = -1;
+  // Adaptive polling: start fast and back off toward pollMs (the cap), so quick
+  // commands return in tens of ms while long waits do not busy-spin.
+  let delay = Math.min(POLL_START_MS, pollMs);
   // Auto-migrate EVERY tool to id-based matching: if the caller didn't pass an
   // explicit id, fall back to the id of the most recently queued command. This
   // makes each tool wait for its OWN result instead of guessing by command name
@@ -143,7 +148,8 @@ async function waitForBridgeResult(
         /* result file briefly unreadable: keep polling */
       }
     }
-    await new Promise((r) => setTimeout(r, pollMs));
+    await new Promise((r) => setTimeout(r, delay));
+    delay = nextPollDelay(delay, pollMs);
   }
   return JSON.stringify({
     error: `Timed out waiting for bridge result${expectedCommand ? ` for command '${expectedCommand}'` : ""}.`,
@@ -1957,7 +1963,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.7.1-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.7.2-mcp-enhanced";
 
 server.tool(
   "check-bridge",

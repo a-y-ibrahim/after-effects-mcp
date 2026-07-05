@@ -2271,7 +2271,10 @@ logText.preferredSize.height = 200;
 // so the old "floating window only" warning was removed.)
 var autoRunCheckbox = panel.add("checkbox", undefined, "Auto-run commands");
 autoRunCheckbox.value = true;
-var checkInterval = 500;
+// How often the panel checks for a new command, in ms. Lowered from 500 to 250
+// to halve per-command latency; the per-check work is tiny (a file existence
+// check), so the CPU cost is negligible and rendering quality is unaffected.
+var checkInterval = 250;
 var isChecking = false;
 var currentCommandId = "";
 // Dedup key for the last command we acted on. We deduplicate by the server-issued
@@ -2281,7 +2284,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.7.1-mcp-enhanced";
+var BRIDGE_VERSION = "1.7.2-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
