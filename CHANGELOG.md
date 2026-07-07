@@ -6,6 +6,39 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Releases now publish to npm automatically: a GitHub Actions workflow runs on
+  every published GitHub Release, re-verifies the type-check and test suite,
+  confirms the release tag matches `package.json`, and publishes with
+  `--provenance`, so the published package is cryptographically linked to the
+  exact commit it was built from. Manual `npm publish` from a local machine is no
+  longer needed.
+
+## [1.7.2] - 2026-07-05
+
+### Changed
+
+- Faster bridge round-trips: the server now polls the result file with an adaptive
+  backoff (starting at 40ms) instead of a fixed 250ms, and the panel checks for
+  commands every 250ms instead of 500ms. This lowers per-command latency, which
+  adds up over multi-step builds. It only changes how often the two sides check for
+  each other; it does not affect what After Effects renders. Bridge protocol
+  `1.7.2-mcp-enhanced`.
+- Updated TypeScript to 6.0.3 and `@types/node` to 26.1.0. The MCP SDK stays
+  pinned to `~1.9.0`; the type-check was re-verified clean under the new compiler
+  with that pin in place.
+
+## [1.7.1] - 2026-07-04
+
+### Fixed
+
+- `contact-sheet` and `match-reference` could fail importing a frame they had just
+  rendered ("File exists but couldn't be opened") because the OS write-lock had not
+  released yet. They now retry the import briefly. Bridge protocol `1.7.1-mcp-enhanced`.
+
+## [1.7.0] - 2026-07-04
+
 ### Added
 
 - **`see-frame`** (flagship): render one or more frames of a composition and return
@@ -20,26 +53,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`match-reference`**: compare a comp to an on-disk reference image, returning a
   side-by-side and a difference map (via AE's Difference blend, no external
   library) so the model can see where the render deviates and converge on a match.
-
-### Changed
-
-- Faster bridge round-trips: the server now polls the result file with an adaptive
-  backoff (starting at 40ms) instead of a fixed 250ms, and the panel checks for
-  commands every 250ms instead of 500ms. This lowers per-command latency, which
-  adds up over multi-step builds. It only changes how often the two sides check for
-  each other; it does not affect what After Effects renders. Bridge protocol
-  `1.7.2-mcp-enhanced`.
-
-### Fixed
-
-- `contact-sheet` and `match-reference` could fail importing a frame they had just
-  rendered ("File exists but couldn't be opened") because the OS write-lock had not
-  released yet. They now retry the import briefly. Bridge protocol `1.7.1-mcp-enhanced`.
-
-- Unit test suite (Vitest, 53 tests) covering bridge result parsing, atomic
-  writes, preset path resolution, command-id generation, platform path helpers,
-  the `.ffx` preset scanner, and WAV amplitude analysis, with scoped v8 coverage
-  (`npm run test:coverage`, about 94% over `src/lib`).
+- Unit test suite (Vitest, 53 tests at release) covering bridge result parsing,
+  atomic writes, preset path resolution, command-id generation, platform path
+  helpers, the `.ffx` preset scanner, and WAV amplitude analysis, with scoped v8
+  coverage (`npm run test:coverage`, about 94% over `src/lib`).
 - Continuous integration (GitHub Actions) running type-check, build, and tests on
   Linux, macOS, and Windows across Node 18, 20, and 22.
 - CodeQL security scanning and Dependabot (npm + GitHub Actions) workflows.

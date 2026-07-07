@@ -71,3 +71,21 @@ Every command is matched by id so results never cross wires.
 
 Open PRs against `main`. Describe what changed and why, note anything you tested
 against a live After Effects, and make sure CI is green.
+
+## Releasing
+
+1. Bump `version` in `package.json` and add a dated section to `CHANGELOG.md`.
+2. Commit and push to `main`, then tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. Publish a GitHub Release from that tag, using the changelog entry as its notes.
+
+Publishing the release triggers
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml) automatically: it
+type-checks, tests, verifies the tag matches `package.json`, and publishes to npm
+with a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements).
+Do not run `npm publish` by hand; the workflow is the only publish path.
+
+This requires a repository secret named `NPM_TOKEN`, an npm **Automation** token
+(Account Settings → Access Tokens → Generate New Token → Automation on npmjs.com).
+Automation tokens are built to publish from CI without an interactive 2FA prompt,
+and cannot change account or org settings. Add it under Settings → Secrets and
+variables → Actions in the GitHub repo.
