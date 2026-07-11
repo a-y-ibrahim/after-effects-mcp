@@ -4,8 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-6366f1)](https://modelcontextprotocol.io)
-
-> 🌍 **[العربية / Arabic README](README.ar.md)**
+[![العربية](badge-ar.svg)](README.ar.md)
 
 Control Adobe After Effects from any MCP client (Claude Code / Claude Desktop) using natural
 language: create and inspect comps and layers, animate, apply effects and presets, manage
