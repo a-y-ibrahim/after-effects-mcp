@@ -35,8 +35,8 @@ After Effects بـ**أي لغة واجهة**.
 ## 📋 المتطلبات
 
 - **Adobe After Effects** 2022 أو أحدث
-- **ويندوز أو ماك.** After Effects نفسه لا يعمل إلا على هذين النظامين، لذا يشغل
-  الخادم على نفس الجهاز الذي عليه After Effects. عملية Node تقلع على لينكس وينجح
+- **ويندوز أو ماك.** After Effects نفسه لا يعمل إلا على هذين النظامين، لذا يعمل
+  الخادم على نفس الجهاز الذي عليه After Effects. عملية Node تبدأ على لينكس وينجح
   البناء والاختبار هناك، لكن لا يوجد After Effects ليتحكم به.
 - **Node.js 18+** - <https://nodejs.org>
 - عميل MCP (مثل **Claude Code**: `npm install -g @anthropic-ai/claude-code`)
