@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-07-13
+
 ### Added
 
 - **`localize-comp`**: duplicate a composition and swap in translated text for one
