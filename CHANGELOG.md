@@ -6,6 +6,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`localize-comp`**: duplicate a composition and swap in translated text for one
+  or more text layers in a single call, auto-detecting Arabic and applying
+  right-to-left direction/alignment per layer (the same logic as
+  `create-text-layer`). The source composition is left untouched; every other
+  layer, effect, and animation carries over unchanged. Translation itself stays
+  the caller's job - the tool only automates the mechanical, error-prone part.
+  Bumps the bridge protocol to `1.7.3-mcp-enhanced`.
+
 ### Changed
 
 - Releases now publish to npm automatically: a GitHub Actions workflow runs on

@@ -33,7 +33,7 @@ _Built and rendered end to end from a single prompt, no manual keyframing._
 | **Reliability**              | Per‑command IDs (no stale results), one undo group per command, faster polling, OneDrive‑proof shared folder, `check-bridge` health/version check |
 | **Layer management**         | Cameras, duplicate, delete, masks, batch transform, comp settings - as dedicated tools                                                            |
 
-**47 tools total.** Full details in [ENHANCEMENTS.md](ENHANCEMENTS.md).
+**48 tools total.** Full details in [ENHANCEMENTS.md](ENHANCEMENTS.md).
 
 ---
 
@@ -69,7 +69,7 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 ```
 
 **First test:** ask your client to _“check the After Effects bridge”_. It should report
-`bridgeVersion: 1.7.2-mcp-enhanced` and `versionMatch: true`.
+`bridgeVersion: 1.7.3-mcp-enhanced` and `versionMatch: true`.
 
 > 💡 If you edit the server, re‑run `npm run build`, then restart the MCP client.
 > If you edit the bridge, also re‑run `npm run install-bridge` and restart After Effects.
@@ -79,7 +79,7 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 ## 🧰 Tools at a glance
 
 **Inspection & diagnostics** - `see-frame`, `contact-sheet`, `match-reference`, `inspect-comp`, `inspect-layer`, `get-results`, `check-bridge`, `run-bridge-test`, `get-help`
-**Composition & layers** - `create-composition`, `set-composition-properties`, `create-text-layer`, `create-camera`, `create-adjustment-layer`, `duplicate-layer`, `delete-layer`, `center-layers`, `set-layer-mask`, `batch-set-layer-properties`
+**Composition & layers** - `create-composition`, `set-composition-properties`, `create-text-layer`, `localize-comp`, `create-camera`, `create-adjustment-layer`, `duplicate-layer`, `delete-layer`, `center-layers`, `set-layer-mask`, `batch-set-layer-properties`
 **Animation** - `setLayerKeyframe`, `setLayerExpression`, `get-layer-clip-frames`
 **Effects** - `apply-effect`, `add-any-effect`, `apply-effect-template`, `list-layer-effects`, `list-available-effects`, `set-effect-property`, `set-effect-keyframe`, `remove-effect`, `mcp_aftereffects_get_effects_help`
 **Presets** - `list-presets`, `search-presets`, `apply-preset`
@@ -89,7 +89,7 @@ claude mcp add AfterEffectsMCP node /absolute/path/to/after-effects-mcp/build/in
 
 For project/comp overview you can also use `run-script` with `getProjectInfo` / `listCompositions`.
 
-📖 Full reference: [docs/TOOLS.md](docs/TOOLS.md) (all 47 tools) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the bridge works).
+📖 Full reference: [docs/TOOLS.md](docs/TOOLS.md) (all 48 tools) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the bridge works).
 
 ---
 

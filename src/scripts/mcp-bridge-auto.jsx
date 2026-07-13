@@ -142,6 +142,61 @@ function createTextLayer(args) {
     }
 }
 
+// Duplicate a composition and swap in translated text for one or more of its text
+// layers, applying the same Arabic/RTL auto-detection as createTextLayer. Every
+// other layer, effect, and animation carries over untouched because the whole
+// comp (not just individual layers) is duplicated first. Translation itself is
+// the caller's job; args.translations already carries the target-language text.
+function localizeComp(args) {
+    try {
+        var comp = _resolveComp(args);
+        if (!comp) return JSON.stringify({ status: "error", message: "No composition found. Provide compName or compIndex, or open a comp." });
+
+        var translations = args.translations;
+        if (!translations || !translations.length) {
+            return JSON.stringify({ status: "error", message: "translations must be a non-empty array of { layerIndex|layerName, text }." });
+        }
+
+        var newComp = comp.duplicate();
+        newComp.name = args.newCompName || (comp.name + " (localized)");
+
+        var updated = [];
+        var skipped = [];
+        for (var i = 0; i < translations.length; i++) {
+            var t = translations[i];
+            var layer = _resolveLayer(newComp, t);
+            if (!layer) {
+                skipped.push({ layerIndex: t.layerIndex, layerName: t.layerName, reason: "layer not found" });
+                continue;
+            }
+            if (!(layer instanceof TextLayer)) {
+                skipped.push({ layerIndex: t.layerIndex, layerName: t.layerName, reason: "not a text layer" });
+                continue;
+            }
+            var textProp = layer.property("ADBE Text Properties").property("ADBE Text Document");
+            var textDocument = textProp.value;
+            textDocument.text = t.text;
+            var isRtl = _applyTextDirection(textDocument, t.text, t.direction);
+            var align = t.alignment || (isRtl ? "right" : null);
+            if (align === "left") { textDocument.justification = ParagraphJustification.LEFT_JUSTIFY; }
+            else if (align === "center") { textDocument.justification = ParagraphJustification.CENTER_JUSTIFY; }
+            else if (align === "right") { textDocument.justification = ParagraphJustification.RIGHT_JUSTIFY; }
+            textProp.setValue(textDocument);
+            updated.push({ name: layer.name, index: layer.index, text: t.text, rtl: isRtl });
+        }
+
+        return JSON.stringify({
+            status: "success",
+            message: "Composition localized successfully",
+            sourceComp: { name: comp.name, index: comp.index },
+            newComp: { name: newComp.name, index: newComp.index },
+            updated: updated,
+            skipped: skipped
+        }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
 
 function createShapeLayer(args) {
     try {
@@ -2284,7 +2339,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.7.2-mcp-enhanced";
+var BRIDGE_VERSION = "1.7.3-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3353,6 +3408,11 @@ function executeCommand(command, args) {
                 logToPanel("Calling createTextLayer function...");
                 result = createTextLayer(args);
                 logToPanel("Returned from createTextLayer.");
+                break;
+            case "localizeComp":
+                logToPanel("Calling localizeComp function...");
+                result = localizeComp(args);
+                logToPanel("Returned from localizeComp.");
                 break;
             case "createShapeLayer":
                 logToPanel("Calling createShapeLayer function...");

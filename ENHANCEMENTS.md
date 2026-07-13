@@ -15,6 +15,12 @@ without breaking any existing tool. All additions are backward compatible.
 - **Arabic / RTL text:** `create-text-layer` (and `setLayerProperties` text path) auto‑detect
   Arabic, set right‑to‑left direction and default right alignment. Force it with `direction`
   (`auto` | `rtl` | `ltr`). For full Arabic shaping, enable AE's Middle‑Eastern text engine.
+- **`localize-comp`:** duplicate a whole composition and swap in translated text for one or
+  more layers in a single call, applying the same per‑layer Arabic/RTL auto‑detection. The
+  source comp is untouched; every non‑text layer, effect, and animation carries over as-is.
+  Translation is the caller's job (an AI assistant already does this well) - the tool only
+  handles the mechanical, error‑prone part: duplicating safely and getting direction/alignment
+  right per layer.
 
 ### -1. Layer management (ported from Dakkshin/after-effects-mcp, upgraded)
 

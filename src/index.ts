@@ -1963,7 +1963,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.7.2-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.7.3-mcp-enhanced";
 
 server.tool(
   "check-bridge",
@@ -2105,6 +2105,70 @@ server.tool(
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error creating text layer: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "localize-comp",
+  "Create a localized duplicate of a composition: swap in translated text for one or more text layers, auto-detecting Arabic and applying right-to-left direction/alignment (same logic as create-text-layer). Every other layer, effect, and animation is preserved unchanged because the whole composition is duplicated first. Translation itself is the caller's job; pass the already-translated strings in `translations`.",
+  {
+    compName: z
+      .string()
+      .optional()
+      .describe("Source composition name (or the active comp if omitted)."),
+    compIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based index among compositions, if compName is omitted."),
+    translations: z
+      .array(
+        z.object({
+          layerIndex: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("1-based index of the text layer to replace, in the source composition."),
+          layerName: z
+            .string()
+            .optional()
+            .describe("Name of the text layer to replace (used if layerIndex is omitted)."),
+          text: z.string().describe("The translated text for this layer."),
+          direction: z
+            .enum(["auto", "rtl", "ltr"])
+            .optional()
+            .describe(
+              "Text direction for this layer. 'auto' (default) = RTL when the text contains Arabic.",
+            ),
+          alignment: z
+            .enum(["left", "center", "right"])
+            .optional()
+            .describe(
+              "Paragraph alignment for this layer. If omitted and the text is RTL, defaults to 'right'.",
+            ),
+        }),
+      )
+      .min(1)
+      .describe(
+        "One entry per text layer to localize, each targeting a layer by layerIndex or layerName.",
+      ),
+    newCompName: z
+      .string()
+      .optional()
+      .describe("Name for the new localized composition (default: '<source name> (localized)')."),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("localizeComp", parameters, 8000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error localizing composition: ${String(error)}` }],
         isError: true,
       };
     }
