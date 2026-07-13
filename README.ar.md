@@ -10,6 +10,10 @@ After Effects بـ**أي لغة واجهة**.
 هذه نسخة مُحسّنة مبنية على العمل الأصلي لـ
 [**Dakkshin/after-effects-mcp**](https://github.com/Dakkshin/after-effects-mcp). انظر [CREDITS.md](CREDITS.md).
 
+https://github.com/user-attachments/assets/af6419bd-5854-46f7-a0ba-49231697eb18
+
+_بُنيت ورُندرت بالكامل من طلب واحد، بدون أي تحريك يدوي (keyframing)._
+
 ---
 
 ## ✨ لماذا هذه النسخة

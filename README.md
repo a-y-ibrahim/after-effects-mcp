@@ -15,6 +15,10 @@ Arabic / RTL support** and tools that work on After Effects in **any UI language
 This is an enhanced edition built on the original work of
 [**Dakkshin/after-effects-mcp**](https://github.com/Dakkshin/after-effects-mcp). See [CREDITS.md](CREDITS.md).
 
+https://github.com/user-attachments/assets/af6419bd-5854-46f7-a0ba-49231697eb18
+
+_Built and rendered end to end from a single prompt, no manual keyframing._
+
 ---
 
 ## ✨ Why this edition
