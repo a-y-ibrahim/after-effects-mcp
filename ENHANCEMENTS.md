@@ -142,7 +142,7 @@ A full pass over the bridge protocol fixed issues that only show up under live u
   `Date.toISOString`/`toJSON`/`now`, `Array.isArray`/`indexOf`/`forEach`/`map`/`filter`,
   `String.prototype.trim`, and `Object.keys`.
 
-### 7. Single dockable panel (v1.6.0–1.6.1)
+### 7. Single dockable panel (v1.6.0-1.6.1)
 
 The bridge previously always opened as a floating window, leaving an empty, unusable tab
 behind whenever it was launched from **Window > mcp-bridge-auto.jsx** (After Effects'

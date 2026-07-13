@@ -1,14 +1,22 @@
 #!/bin/sh
-# Rejects any commit message containing an em-dash (—, U+2014) or en-dash
-# used as a standalone word-break (– , U+2013) — the single most common AI-writing
-# tell. Enable this hook once per clone with:
+# Rejects any commit message containing an em-dash (U+2014) or en-dash
+# (U+2013), the single most common AI-writing tell. Enable this hook once
+# per clone with:
 #   git config core.hooksPath .githooks
 
 msg_file="$1"
 
 if grep -qP '\xe2\x80\x94' "$msg_file" 2>/dev/null || LC_ALL=C grep -q $'\xe2\x80\x94' "$msg_file"; then
   echo ""
-  echo "COMMIT REJECTED: your commit message contains an em-dash (\xe2\x80\x94)."
+  echo "COMMIT REJECTED: your commit message contains an em-dash (U+2014)."
+  echo "Replace it with a regular hyphen (-), a comma, or a period, then retry."
+  echo ""
+  exit 1
+fi
+
+if grep -qP '\xe2\x80\x93' "$msg_file" 2>/dev/null || LC_ALL=C grep -q $'\xe2\x80\x93' "$msg_file"; then
+  echo ""
+  echo "COMMIT REJECTED: your commit message contains an en-dash (U+2013)."
   echo "Replace it with a regular hyphen (-), a comma, or a period, then retry."
   echo ""
   exit 1

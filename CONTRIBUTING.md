@@ -32,14 +32,14 @@ runs the same checks on Linux, macOS, and Windows across Node 18, 20, and 22.
 
 ## How the project is laid out
 
-- `src/index.ts` — the MCP server: tool definitions and the file-bridge dispatch.
-- `src/lib/bridge-core.ts` — pure, unit-tested helpers (result parsing, preset
+- `src/index.ts`: the MCP server, tool definitions and the file-bridge dispatch.
+- `src/lib/bridge-core.ts`: pure, unit-tested helpers (result parsing, preset
   path resolution, id generation). Put logic here when it can be tested without
   a running server or a live After Effects.
-- `src/scripts/mcp-bridge-auto.jsx` — the ExtendScript panel that runs inside
+- `src/scripts/mcp-bridge-auto.jsx`: the ExtendScript panel that runs inside
   After Effects and executes queued commands. This is ES3-era ExtendScript, not
   Node: no modern JS built-ins without the polyfills already at the top of the file.
-- `tests/*.test.ts` — Vitest unit tests. The `tests/*.cjs` files are manual probes
+- `tests/*.test.ts`: Vitest unit tests. The `tests/*.cjs` files are manual probes
   that talk to a live AE instance and are not part of the automated suite.
 
 ## The bridge, in one paragraph
