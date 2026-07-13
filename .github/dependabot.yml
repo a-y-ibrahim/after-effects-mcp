@@ -11,9 +11,11 @@ updates:
           - minor
           - patch
     ignore:
-      # Vet major SDK bumps manually; the tool surface depends on it.
+      # Pinned: every release past ~1.9.0 we've tried (1.26.0, 1.29.0) makes
+      # `tsc` OOM or exceed the CI timeout while type-checking this SDK's own
+      # types (see SECURITY.md). This blocks minor/patch bumps too, not just
+      # majors, because the break has shown up within the 1.x line itself.
       - dependency-name: "@modelcontextprotocol/sdk"
-        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
