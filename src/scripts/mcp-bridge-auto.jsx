@@ -130,12 +130,12 @@ function createTextLayer(args) {
         else if (alignment === "center") { textDocument.justification = ParagraphJustification.CENTER_JUSTIFY; } 
         else if (alignment === "right") { textDocument.justification = ParagraphJustification.RIGHT_JUSTIFY; }
         textProp.setValue(textDocument);
-        textLayer.property("ADBE Position").setValue(position);
+        _transformProp(textLayer, "ADBE Position").setValue(position);
         textLayer.startTime = startTime;
         if (duration > 0) { textLayer.outPoint = startTime + duration; }
         return JSON.stringify({
             status: "success", message: "Text layer created successfully",
-            layer: { name: textLayer.name, index: textLayer.index, type: "text", rtl: isRtl, inPoint: textLayer.inPoint, outPoint: textLayer.outPoint, position: textLayer.property("ADBE Position").value }
+            layer: { name: textLayer.name, index: textLayer.index, type: "text", rtl: isRtl, inPoint: textLayer.inPoint, outPoint: textLayer.outPoint, position: _transformProp(textLayer, "ADBE Position").value }
         }, null, 2);
     } catch (error) {
         return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
@@ -154,23 +154,88 @@ function localizeComp(args) {
 
         var translations = args.translations;
         if (!translations || !translations.length) {
-            return JSON.stringify({ status: "error", message: "translations must be a non-empty array of { layerIndex|layerName, text }." });
+            return JSON.stringify({ status: "error", message: "translations must be a non-empty array of { layerIndex|layerName, text } or { path, text }." });
         }
 
         var newComp = comp.duplicate();
         newComp.name = args.newCompName || (comp.name + " (localized)");
 
+        // A precomp is never edited in place: every precomp on every path is
+        // duplicated the first time it is reached, and the layer that pointed
+        // at it is repointed to the duplicate. Two maps track this so a precomp
+        // is duplicated exactly once even when several translation paths pass
+        // through it:
+        //  - precompDupes: original item id -> its localized duplicate, for
+        //    when two DIFFERENT layers both source the same original precomp
+        //    (e.g. two instances of the same lower-third).
+        //  - knownDuplicateIds: id of every duplicate this call has already
+        //    created, for when the SAME layer is walked again by a later
+        //    translation - by then its `.source` IS the duplicate (the first
+        //    walk already called replaceSource), not the original, so looking
+        //    it up in precompDupes would miss and duplicate it a second time,
+        //    silently orphaning the first translation's work.
+        var precompDupes = {};
+        var knownDuplicateIds = {};
+
         var updated = [];
         var skipped = [];
         for (var i = 0; i < translations.length; i++) {
             var t = translations[i];
-            var layer = _resolveLayer(newComp, t);
+            // Backward compatible: no `path` means "this layer, at the top level"
+            // (the same shape localize-comp shipped with originally).
+            var path = t.path && t.path.length ? t.path : [{ layerIndex: t.layerIndex, layerName: t.layerName }];
+
+            var targetComp = newComp;
+            var failReason = null;
+            for (var p = 0; p < path.length - 1; p++) {
+                var midLayer = _resolveLayer(targetComp, path[p]);
+                if (!midLayer) { failReason = "path[" + p + "]: layer not found"; break; }
+                if (!(midLayer.source && midLayer.source instanceof CompItem)) {
+                    failReason = "path[" + p + "]: not a precomposition layer";
+                    break;
+                }
+                var src = midLayer.source;
+                var srcKey = String(src.id);
+                // AE auto-renames a layer to match its source whenever the layer
+                // has no custom name of its own, so replaceSource() below can
+                // silently rename e.g. "Scene" to "Scene (localized)". Capture the
+                // name now and restore it after the swap so a later translation
+                // in this same call can still resolve this path segment by its
+                // original layerName.
+                var midLayerName = midLayer.name;
+                var dupPrecomp;
+                if (knownDuplicateIds[srcKey]) {
+                    // Already repointed to a localized duplicate by an earlier
+                    // translation this call - reuse it as-is, nothing to do.
+                    dupPrecomp = src;
+                } else if (precompDupes[srcKey]) {
+                    // The original has already been duplicated once (a different
+                    // layer shares it) - point this layer at that same duplicate.
+                    dupPrecomp = precompDupes[srcKey];
+                    midLayer.replaceSource(dupPrecomp, false);
+                    midLayer.name = midLayerName;
+                } else {
+                    dupPrecomp = src.duplicate();
+                    dupPrecomp.name = src.name + " (localized)";
+                    precompDupes[srcKey] = dupPrecomp;
+                    knownDuplicateIds[String(dupPrecomp.id)] = true;
+                    midLayer.replaceSource(dupPrecomp, false);
+                    midLayer.name = midLayerName;
+                }
+                targetComp = dupPrecomp;
+            }
+            if (failReason) {
+                skipped.push({ path: path, reason: failReason });
+                continue;
+            }
+
+            var layer = _resolveLayer(targetComp, path[path.length - 1]);
             if (!layer) {
-                skipped.push({ layerIndex: t.layerIndex, layerName: t.layerName, reason: "layer not found" });
+                skipped.push({ path: path, reason: "layer not found" });
                 continue;
             }
             if (!(layer instanceof TextLayer)) {
-                skipped.push({ layerIndex: t.layerIndex, layerName: t.layerName, reason: "not a text layer" });
+                skipped.push({ path: path, reason: "not a text layer" });
                 continue;
             }
             var textProp = layer.property("ADBE Text Properties").property("ADBE Text Document");
@@ -182,7 +247,12 @@ function localizeComp(args) {
             else if (align === "center") { textDocument.justification = ParagraphJustification.CENTER_JUSTIFY; }
             else if (align === "right") { textDocument.justification = ParagraphJustification.RIGHT_JUSTIFY; }
             textProp.setValue(textDocument);
-            updated.push({ name: layer.name, index: layer.index, text: t.text, rtl: isRtl });
+            updated.push({ path: path, name: layer.name, index: layer.index, text: t.text, rtl: isRtl, inComp: targetComp.name });
+        }
+
+        var precompNames = [];
+        for (var key in precompDupes) {
+            if (precompDupes.hasOwnProperty(key)) precompNames.push(precompDupes[key].name);
         }
 
         return JSON.stringify({
@@ -190,6 +260,7 @@ function localizeComp(args) {
             message: "Composition localized successfully",
             sourceComp: { name: comp.name, index: comp.index },
             newComp: { name: newComp.name, index: newComp.index },
+            precompsDuplicated: precompNames,
             updated: updated,
             skipped: skipped
         }, null, 2);
@@ -248,12 +319,12 @@ function createShapeLayer(args) {
             var strokeW = _safeProp(stroke, "ADBE Vector Stroke Width", "Stroke Width"); if (strokeW) strokeW.setValue(strokeWidth);
             var strokeOp = _safeProp(stroke, "ADBE Vector Stroke Opacity", "Opacity"); if (strokeOp) strokeOp.setValue(100);
         }
-        shapeLayer.property("ADBE Position").setValue(position);
+        _transformProp(shapeLayer, "ADBE Position").setValue(position);
         shapeLayer.startTime = startTime;
         if (duration > 0) { shapeLayer.outPoint = startTime + duration; }
         return JSON.stringify({
             status: "success", message: "Shape layer created successfully",
-            layer: { name: shapeLayer.name, index: shapeLayer.index, type: "shape", shapeType: shapeType, inPoint: shapeLayer.inPoint, outPoint: shapeLayer.outPoint, position: shapeLayer.property("ADBE Position").value }
+            layer: { name: shapeLayer.name, index: shapeLayer.index, type: "shape", shapeType: shapeType, inPoint: shapeLayer.inPoint, outPoint: shapeLayer.outPoint, position: _transformProp(shapeLayer, "ADBE Position").value }
         }, null, 2);
     } catch (error) {
         return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
@@ -288,12 +359,12 @@ function createSolidLayer(args) {
         } else {
             solidLayer = comp.layers.addSolid(color, name, size[0], size[1], 1);
         }
-        solidLayer.property("ADBE Position").setValue(position);
+        _transformProp(solidLayer, "ADBE Position").setValue(position);
         solidLayer.startTime = startTime;
         if (duration > 0) { solidLayer.outPoint = startTime + duration; }
         return JSON.stringify({
             status: "success", message: isAdjustment ? "Adjustment layer created successfully" : "Solid layer created successfully",
-            layer: { name: solidLayer.name, index: solidLayer.index, type: isAdjustment ? "adjustment" : "solid", inPoint: solidLayer.inPoint, outPoint: solidLayer.outPoint, position: solidLayer.property("ADBE Position").value, isAdjustment: solidLayer.adjustmentLayer }
+            layer: { name: solidLayer.name, index: solidLayer.index, type: isAdjustment ? "adjustment" : "solid", inPoint: solidLayer.inPoint, outPoint: solidLayer.outPoint, position: _transformProp(solidLayer, "ADBE Position").value, isAdjustment: solidLayer.adjustmentLayer }
         }, null, 2);
     } catch (error) {
         return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
@@ -411,18 +482,18 @@ function setLayerProperties(args) {
         }
 
         
-        if (position !== undefined && position !== null) { layer.property("ADBE Position").setValue(position); changedProperties.push("position"); }
-        if (scale !== undefined && scale !== null) { layer.property("ADBE Scale").setValue(scale); changedProperties.push("scale"); }
+        if (position !== undefined && position !== null) { _transformProp(layer, "ADBE Position").setValue(position); changedProperties.push("position"); }
+        if (scale !== undefined && scale !== null) { _transformProp(layer, "ADBE Scale").setValue(scale); changedProperties.push("scale"); }
         if (rotation !== undefined && rotation !== null) {
-            if (layer.threeDLayer) { 
-                
-                layer.property("ADBE Rotate Z").setValue(rotation);
-            } else { 
-                layer.property("ADBE Rotate Z").setValue(rotation); 
+            if (layer.threeDLayer) {
+
+                _transformProp(layer, "ADBE Rotate Z").setValue(rotation);
+            } else {
+                _transformProp(layer, "ADBE Rotate Z").setValue(rotation);
             }
             changedProperties.push("rotation");
         }
-        if (opacity !== undefined && opacity !== null) { layer.property("ADBE Opacity").setValue(opacity); changedProperties.push("opacity"); }
+        if (opacity !== undefined && opacity !== null) { _transformProp(layer, "ADBE Opacity").setValue(opacity); changedProperties.push("opacity"); }
         if (startTime !== undefined && startTime !== null) { layer.startTime = startTime; changedProperties.push("startTime"); }
         if (duration !== undefined && duration !== null && duration > 0) {
             var actualStartTime = (startTime !== undefined && startTime !== null) ? startTime : layer.startTime;
@@ -430,14 +501,14 @@ function setLayerProperties(args) {
             changedProperties.push("duration");
         }
 
-        
+
         var returnLayerInfo = {
             name: layer.name,
             index: layer.index,
-            position: layer.property("ADBE Position").value,
-            scale: layer.property("ADBE Scale").value,
-            rotation: layer.threeDLayer ? layer.property("ADBE Rotate Z").value : layer.property("ADBE Rotate Z").value, 
-            opacity: layer.property("ADBE Opacity").value,
+            position: _transformProp(layer, "ADBE Position").value,
+            scale: _transformProp(layer, "ADBE Scale").value,
+            rotation: _transformProp(layer, "ADBE Rotate Z").value,
+            opacity: _transformProp(layer, "ADBE Opacity").value,
             inPoint: layer.inPoint,
             outPoint: layer.outPoint,
             changedProperties: changedProperties
@@ -1471,7 +1542,7 @@ function createAdjustmentLayer(args) {
 
         var adjustmentLayer = comp.layers.addSolid([0, 0, 0], name, size[0], size[1], 1);
         adjustmentLayer.adjustmentLayer = true;
-        adjustmentLayer.property("ADBE Position").setValue(position);
+        _transformProp(adjustmentLayer, "ADBE Position").setValue(position);
         adjustmentLayer.startTime = startTime;
         if (duration > 0) {
             adjustmentLayer.outPoint = startTime + duration;
@@ -1486,7 +1557,7 @@ function createAdjustmentLayer(args) {
                 type: "adjustment",
                 inPoint: adjustmentLayer.inPoint,
                 outPoint: adjustmentLayer.outPoint,
-                position: adjustmentLayer.property("ADBE Position").value,
+                position: _transformProp(adjustmentLayer, "ADBE Position").value,
                 isAdjustment: adjustmentLayer.adjustmentLayer
             }
         }, null, 2);
@@ -2339,7 +2410,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.7.3-mcp-enhanced";
+var BRIDGE_VERSION = "1.7.4-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -2552,11 +2623,34 @@ function _safeProp(parent, matchName, displayName) {
     return p;
 }
 
+// Get a Transform-group property (Position, Scale, Rotation, Opacity, Anchor
+// Point...) on a layer. Calling layer.property(matchName) directly for one of
+// these returns null instead of throwing on some After Effects builds
+// (confirmed live, every layer type, After Effects 2026 26.3x) even though the
+// identical lookup works when routed through the parent "ADBE Transform Group"
+// first. Route every transform-property access through this helper instead of
+// calling layer.property(matchName) directly.
+function _transformProp(layer, matchName) {
+    var tg = layer.property("ADBE Transform Group");
+    return tg ? tg.property(matchName) : layer.property(matchName);
+}
+
 // --- Arabic / RTL text support ------------------------------------------------
 // Detect Arabic (and Arabic presentation forms) anywhere in the string.
+// Detect Arabic (and Arabic presentation forms) anywhere in the string. Built
+// via `new RegExp()` with \uXXXX pattern escapes (escape text passed to the
+// constructor, not raw Unicode characters embedded in a literal /[...]/) because
+// ExtendScript's regex engine does not reliably parse a literal character class
+// whose range boundaries are certain BMP characters written directly as source
+// text - verified live in After Effects: the original literal-character range
+// silently matched nothing, while the identical range built from escape text
+// works. This also corrects the Arabic Presentation Forms-B upper bound: it
+// previously ran to U+FEFF, but U+FEFD/FEFE are unassigned and U+FEFF is the
+// byte-order mark, not part of that block, which actually ends at U+FEFC.
+var _ARABIC_RE = new RegExp("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFC]");
 function _hasArabic(s) {
     if (s === undefined || s === null) return false;
-    return /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test("" + s);
+    return _ARABIC_RE.test("" + s);
 }
 
 // Apply text direction to a TextDocument. direction: "rtl" | "ltr" | "auto" (default

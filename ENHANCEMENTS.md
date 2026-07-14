@@ -21,6 +21,11 @@ without breaking any existing tool. All additions are backward compatible.
   Translation is the caller's job (an AI assistant already does this well) - the tool only
   handles the mechanical, error‑prone part: duplicating safely and getting direction/alignment
   right per layer.
+  Reaches text nested inside precompositions too: pass a `path` (a chain of precomp layers
+  ending in the text layer) instead of a top‑level `layerIndex`/`layerName`. Every precomp
+  the path passes through is duplicated the first time it's reached (and reused if another
+  path passes through it again), so nested source content is never edited in place - not
+  even when two localized layers share the same precomp.
 
 ### -1. Layer management (ported from Dakkshin/after-effects-mcp, upgraded)
 

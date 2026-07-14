@@ -1963,7 +1963,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.7.3-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.7.4-mcp-enhanced";
 
 server.tool(
   "check-bridge",
@@ -2113,7 +2113,7 @@ server.tool(
 
 server.tool(
   "localize-comp",
-  "Create a localized duplicate of a composition: swap in translated text for one or more text layers, auto-detecting Arabic and applying right-to-left direction/alignment (same logic as create-text-layer). Every other layer, effect, and animation is preserved unchanged because the whole composition is duplicated first. Translation itself is the caller's job; pass the already-translated strings in `translations`.",
+  "Create a localized duplicate of a composition: swap in translated text for one or more text layers, auto-detecting Arabic and applying right-to-left direction/alignment (same logic as create-text-layer). Every other layer, effect, and animation is preserved unchanged because the whole composition is duplicated first. Text layers nested inside precompositions are reachable too via `path`: every precomposition on the path is safely duplicated the first time it's encountered (and reused if referenced again from another path), so the original precomps are never modified. Translation itself is the caller's job; pass the already-translated strings in `translations`.",
   {
     compName: z
       .string()
@@ -2133,11 +2133,32 @@ server.tool(
             .int()
             .positive()
             .optional()
-            .describe("1-based index of the text layer to replace, in the source composition."),
+            .describe(
+              "1-based index of the text layer to replace, in the source composition's top level. Ignored if `path` is given.",
+            ),
           layerName: z
             .string()
             .optional()
-            .describe("Name of the text layer to replace (used if layerIndex is omitted)."),
+            .describe(
+              "Name of the text layer to replace, in the source composition's top level. Ignored if `path` is given.",
+            ),
+          path: z
+            .array(
+              z.object({
+                layerIndex: z
+                  .number()
+                  .int()
+                  .positive()
+                  .optional()
+                  .describe("1-based layer index at this nesting level."),
+                layerName: z.string().optional().describe("Layer name at this nesting level."),
+              }),
+            )
+            .min(1)
+            .optional()
+            .describe(
+              "Full path to a text layer nested inside one or more precompositions: every segment but the last must resolve to a precomposition layer, and the last segment must be the text layer itself. Omit to target a top-level layer with layerIndex/layerName instead.",
+            ),
           text: z.string().describe("The translated text for this layer."),
           direction: z
             .enum(["auto", "rtl", "ltr"])
@@ -2155,7 +2176,7 @@ server.tool(
       )
       .min(1)
       .describe(
-        "One entry per text layer to localize, each targeting a layer by layerIndex or layerName.",
+        "One entry per text layer to localize, each targeting a layer by layerIndex/layerName (top level) or by path (nested inside precompositions).",
       ),
     newCompName: z
       .string()

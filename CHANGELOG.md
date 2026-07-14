@@ -6,6 +6,48 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`localize-comp`** now reaches text layers nested inside precompositions: pass a
+  `path` (a chain of precomp layers ending in the text layer) instead of a
+  top-level `layerIndex`/`layerName`. Every precomposition on the path is
+  duplicated the first time it's reached, and the duplicate is reused if another
+  path passes through the same precomp again, so nested source content is never
+  edited in place. Bumps the bridge protocol to `1.7.4-mcp-enhanced`.
+
+### Fixed
+
+- Automatic Arabic detection (`_hasArabic`, used by `create-text-layer` and
+  `localize-comp` to set right-to-left direction and default right alignment)
+  silently matched nothing when run inside real After Effects, despite working
+  as expected outside it. ExtendScript's regex engine does not reliably parse a
+  literal character class whose range boundaries are certain BMP characters
+  written directly as source text; rebuilt the same ranges via `new RegExp()`
+  with `\uXXXX` escape text instead, which is unaffected. Also corrects the
+  Arabic Presentation Forms-B range, which previously ran three code points too
+  far (into two unassigned code points and the byte-order mark). Found and
+  verified live, in After Effects, while testing the precomp change above.
+- `localize-comp`: when two translations in the same call passed through the
+  same precomposition, the second failed with "layer not found". After
+  Effects renames a layer to match its source whenever the layer has no custom
+  name of its own, so the first translation's `replaceSource` silently renamed
+  the shared precomp layer (e.g. "Scene" to "Scene (localized)") out from under
+  the second translation's lookup. The layer's original name is now captured
+  before the swap and restored after it. Found and verified live while testing
+  the precomp change above.
+- Reading or writing a layer's Transform properties (Position, Scale,
+  Rotation, Opacity, Anchor Point) via `layer.property(matchName)` directly -
+  instead of through the layer's "ADBE Transform Group" first - returns `null`
+  instead of throwing, in every layer type, on at least one recent After
+  Effects 2026 build (26.3x). This silently broke `create-text-layer`,
+  `create-shape-layer`, `create-adjustment-layer` (`createSolidLayer` with
+  `isAdjustment`), and the position/scale/rotation/opacity path of
+  `batch-set-layer-properties`/`setLayerProperties`, each of which crashed on
+  `.setValue(...)` against the `null`. Every direct Transform-group property
+  access now goes through a new `_transformProp(layer, matchName)` helper that
+  reads it via "ADBE Transform Group" first. Found and verified live while
+  testing the precomp change above.
+
 ## [1.7.3] - 2026-07-13
 
 ### Added
