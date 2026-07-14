@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.4] - 2026-07-13
+
 ### Added
 
 - **`localize-comp`** now reaches text layers nested inside precompositions: pass a
