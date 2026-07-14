@@ -74,9 +74,19 @@ against a live After Effects, and make sure CI is green.
 
 ## Releasing
 
-1. Bump `version` in `package.json` and add a dated section to `CHANGELOG.md`.
-2. Commit and push to `main`, then tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. Publish a GitHub Release from that tag, using the changelog entry as its notes.
+1. Pick the version bump by what actually changed, per [Semantic
+   Versioning](https://semver.org/spec/v2.0.0.html) - this project publishes to npm,
+   and consumers pinned to `~X.Y.Z` (patch-only) rely on this being accurate:
+   - **Patch** (`1.7.3` → `1.7.4`): bug fixes only. No new tool, no new parameter, no
+     behavior a caller could not already invoke before.
+   - **Minor** (`1.7.x` → `1.8.0`): anything backward-compatible that adds
+     capability - a new tool, a new optional parameter, a new accepted value. If the
+     changelog entry has an `### Added` section, it is at least a minor bump.
+   - **Major** (`1.x.x` → `2.0.0`): removes or changes the meaning of an existing
+     tool or parameter in a way that could break an existing caller.
+2. Bump `version` in `package.json` and add a dated section to `CHANGELOG.md`.
+3. Commit and push to `main`, then tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+4. Publish a GitHub Release from that tag, using the changelog entry as its notes.
 
 Publishing the release triggers
 [`.github/workflows/publish.yml`](.github/workflows/publish.yml) automatically: it

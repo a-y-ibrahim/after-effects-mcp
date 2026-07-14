@@ -67,7 +67,7 @@ claude mcp add AfterEffectsMCP node /المسار/المطلق/إلى/after-effe
 ```
 
 **أول اختبار:** اطلب من العميل _«check the After Effects bridge»_. يجب أن يرد بـ
-`bridgeVersion: 1.7.3-mcp-enhanced` و`versionMatch: true`.
+`bridgeVersion: 1.7.4-mcp-enhanced` و`versionMatch: true`.
 
 > 💡 إن عدلت الخادم، أعد `npm run build` ثم أعد تشغيل عميل MCP.
 > إن عدلت الجسر، أعد أيضا `npm run install-bridge` وأعد تشغيل After Effects.
