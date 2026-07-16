@@ -10,6 +10,7 @@ import {
   makeCommandIdFactory,
   resolveBridgeDir,
   aerenderCandidates,
+  buildFfmpegConvertArgs,
   tail,
   nextPollDelay,
   POLL_START_MS,
@@ -219,6 +220,40 @@ describe("aerenderCandidates", () => {
     expect(c[0]).toContain("Applications");
     expect(c.some((p) => p.endsWith("aerender"))).toBe(true);
     expect(c.some((p) => p.includes("aerender.exe"))).toBe(false);
+  });
+});
+
+describe("buildFfmpegConvertArgs", () => {
+  it("transcodes to 16-bit PCM WAV without forcing a sample rate or channel count", () => {
+    const args = buildFfmpegConvertArgs("/in/song.mp3", "/out/song.wav");
+    expect(args).toEqual([
+      "-y",
+      "-protocol_whitelist",
+      "file",
+      "-i",
+      "/in/song.mp3",
+      "-vn",
+      "-acodec",
+      "pcm_s16le",
+      "/out/song.wav",
+    ]);
+    expect(args).not.toContain("-ar");
+    expect(args).not.toContain("-ac");
+  });
+
+  it("restricts ffmpeg to the file protocol, ahead of -i", () => {
+    const args = buildFfmpegConvertArgs("/in/song.mp3", "/out/song.wav");
+    const whitelistIdx = args.indexOf("-protocol_whitelist");
+    const inputIdx = args.indexOf("-i");
+    expect(whitelistIdx).toBeGreaterThanOrEqual(0);
+    expect(whitelistIdx).toBeLessThan(inputIdx);
+    expect(args[whitelistIdx + 1]).toBe("file");
+  });
+
+  it("passes the input and output paths through unchanged, even if URL-like", () => {
+    const args = buildFfmpegConvertArgs("http://evil.example/track.mp3", "C:\\temp\\out.wav");
+    expect(args).toContain("http://evil.example/track.mp3");
+    expect(args).toContain("C:\\temp\\out.wav");
   });
 });
 

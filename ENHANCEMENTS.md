@@ -164,6 +164,17 @@ resize handling on both the docked and floating (`File > Scripts > Run Script Fi
 Also fixed a follow-up bug where the docked-panel path called `panel.update()`, a method
 that only exists on a floating `Window`, which silently broke every command until guarded.
 
+### 8. `analyze-audio-waveform`: any audio format, not just WAV (v1.8.0)
+
+Previously this tool only understood uncompressed PCM WAV and rejected anything else
+outright. It now transparently transcodes mp3, m4a/aac, ogg, flac, or a video file's
+audio track to a temporary PCM WAV first, using **ffmpeg** if it is installed and on
+`PATH` (override its location with `AE_FFMPEG_PATH`). The temporary file is deleted
+after analysis. If ffmpeg is not found, the tool reports that clearly instead of just
+saying "unsupported format" - the fix is either installing ffmpeg or converting the
+file to WAV by hand. WAV files still go through the original, dependency-free path
+unchanged.
+
 Current bridge protocol: `1.6.4-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in the
 `.jsx` and `EXPECTED_BRIDGE_VERSION` in `index.ts`; `check-bridge` warns on any mismatch).
 
@@ -187,7 +198,20 @@ Then:
   not a parallel queue.
 - `start-render` blocks the AE UI by design (it's the in-app render queue). Use
   `render-aerender` for a non-blocking background render instead.
-- Audio analysis is **PCM WAV only**; convert mp3/m4a to WAV first.
+- Audio analysis reads uncompressed **PCM WAV** natively; any other format
+  (mp3, m4a/aac, ogg, flac, ...) is transcoded on the fly via **ffmpeg**, which
+  must be installed and on `PATH` (override with `AE_FFMPEG_PATH`). Without
+  ffmpeg, non-WAV files still need converting to WAV first. The conversion
+  input is restricted to the `file` protocol (`-protocol_whitelist file`) so a
+  path that happens to look like a URL cannot make ffmpeg fetch a network
+  resource instead, and both the version probe and the conversion itself run
+  under a hard timeout so a hung ffmpeg process cannot block the server
+  indefinitely. The temporary WAV is written under the OS temp directory with
+  a random name and deleted right after analysis; its access permissions rely
+  on the OS's own per-user temp directory isolation (true by default on
+  Windows and macOS, the two supported platforms) rather than an explicit
+  chmod, so a shared, misconfigured temp directory on an unsupported platform
+  is a residual not defended against here.
 - Layer/comp targeting in the older tools is by **1-based index** (shifts when layers
   are reordered). Prefer `execute-script` with stable `layer.id` for fragile multi-step work.
 - The file-polling bridge has a real architectural ceiling (per-command latency, no

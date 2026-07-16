@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import { fileURLToPath } from "url";
 import {
@@ -15,6 +16,7 @@ import {
   makeCommandIdFactory,
   resolveBridgeDir,
   aerenderCandidates,
+  buildFfmpegConvertArgs,
   tail,
   nextPollDelay,
   POLL_START_MS,
@@ -1814,6 +1816,50 @@ function analyzeWavAmplitudes(filePath: string, numPoints: number = 200): WavAna
   }
 }
 
+// --- Optional ffmpeg fallback for non-WAV audio formats -----------------------
+// analyzeWavBuffer only understands uncompressed PCM WAV. Any other format
+// (mp3, m4a/aac, ogg, flac, a video file's audio track, ...) is transcoded to a
+// temporary PCM WAV via ffmpeg first, if it's installed. ffmpeg is optional: a
+// missing install falls back to a clear error instead of a silent failure.
+
+// Both spawnSync calls carry an explicit timeout: without one, a hung or
+// maliciously-crafted input could block this synchronous call forever, and
+// since spawnSync blocks the whole Node event loop, that would wedge the
+// entire MCP server, not just this one tool call.
+const FFMPEG_PROBE_TIMEOUT_MS = 5000;
+const FFMPEG_CONVERT_TIMEOUT_MS = 120000;
+
+function findFfmpeg(): string | null {
+  const candidate = process.env.AE_FFMPEG_PATH || "ffmpeg";
+  const probe = spawnSync(candidate, ["-version"], {
+    stdio: "ignore",
+    timeout: FFMPEG_PROBE_TIMEOUT_MS,
+  });
+  // probe.signal is set when the timeout killed the process; treat that the
+  // same as "not found" rather than reporting a hung binary as usable.
+  return probe.error || probe.signal ? null : candidate;
+}
+
+function convertToWavWithFfmpeg(ffmpegPath: string, inputPath: string): string {
+  const outputPath = path.join(os.tmpdir(), `ae-mcp-audio-${randomUUID()}.wav`);
+  const result = spawnSync(ffmpegPath, buildFfmpegConvertArgs(inputPath, outputPath), {
+    encoding: "utf8",
+    timeout: FFMPEG_CONVERT_TIMEOUT_MS,
+  });
+  if (result.error || result.status !== 0 || !fs.existsSync(outputPath)) {
+    try {
+      fs.unlinkSync(outputPath);
+    } catch {
+      /* nothing to clean up */
+    }
+    if (result.signal) {
+      throw new Error(`ffmpeg timed out or was killed (signal ${result.signal})`);
+    }
+    throw new Error(result.stderr ? tail(result.stderr, 500) : "ffmpeg conversion failed");
+  }
+  return outputPath;
+}
+
 server.tool(
   "get-audio-info",
   "Get audio metadata, source file path, existing markers, and audio level keyframes for a layer in After Effects.",
@@ -1837,12 +1883,12 @@ server.tool(
 
 server.tool(
   "analyze-audio-waveform",
-  "Analyze a WAV audio file to extract waveform amplitude data and detect peaks/transients. First call get-audio-info to retrieve the sourceFilePath, then pass it here. Returns normalized amplitude values (0-1) at evenly spaced time intervals plus an array of peak times where transients are detected.",
+  "Analyze an audio file to extract waveform amplitude data and detect peaks/transients. First call get-audio-info to retrieve the sourceFilePath, then pass it here. Returns normalized amplitude values (0-1) at evenly spaced time intervals plus an array of peak times where transients are detected. Uncompressed PCM WAV is read natively; any other format (mp3, m4a/aac, ogg, flac, a video file's audio track, ...) is transcoded on the fly via ffmpeg if it is installed and on PATH (override its location with the AE_FFMPEG_PATH env var).",
   {
     filePath: z
       .string()
       .describe(
-        "Absolute path to the WAV audio file (obtained from get-audio-info sourceFilePath).",
+        "Absolute path to the audio file (obtained from get-audio-info sourceFilePath). WAV works with no extra dependency; other formats need ffmpeg installed.",
       ),
     numPoints: z
       .number()
@@ -1853,6 +1899,7 @@ server.tool(
       .describe("Number of amplitude samples to return (default: 200). Higher = more detail."),
   },
   async ({ filePath, numPoints = 200 }) => {
+    let convertedPath: string | null = null;
     try {
       if (!fs.existsSync(filePath)) {
         return {
@@ -1865,7 +1912,45 @@ server.tool(
           isError: true,
         };
       }
-      const result = analyzeWavAmplitudes(filePath, numPoints);
+
+      let result = analyzeWavAmplitudes(filePath, numPoints);
+
+      if (!result) {
+        const ffmpegPath = findFfmpeg();
+        if (!ffmpegPath) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  status: "error",
+                  message:
+                    "Could not parse this file as PCM WAV, and ffmpeg (needed to convert other formats like mp3/m4a/aac/ogg) was not found on PATH. Install ffmpeg, or set the AE_FFMPEG_PATH env var to its full path.",
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        try {
+          convertedPath = convertToWavWithFfmpeg(ffmpegPath, filePath);
+        } catch (conversionError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  status: "error",
+                  message: `ffmpeg could not convert this file to WAV: ${String(conversionError)}`,
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        result = analyzeWavAmplitudes(convertedPath, numPoints);
+      }
+
       if (!result) {
         return {
           content: [
@@ -1874,13 +1959,14 @@ server.tool(
               text: JSON.stringify({
                 status: "error",
                 message:
-                  "Could not parse audio file. Only uncompressed PCM WAV files are supported. For other formats, convert to WAV first.",
+                  "Could not parse audio file, even after ffmpeg conversion. The format may be unsupported or the file may be corrupt.",
               }),
             },
           ],
           isError: true,
         };
       }
+
       return {
         content: [
           {
@@ -1908,6 +1994,14 @@ server.tool(
         content: [{ type: "text", text: `Error analyzing waveform: ${String(error)}` }],
         isError: true,
       };
+    } finally {
+      if (convertedPath) {
+        try {
+          fs.unlinkSync(convertedPath);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
     }
   },
 );

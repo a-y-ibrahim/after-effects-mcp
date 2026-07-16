@@ -6,6 +6,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-16
+
+### Added
+
+- **`analyze-audio-waveform`** now accepts any audio format, not just PCM WAV.
+  Non-WAV input (mp3, m4a/aac, ogg, flac, a video file's audio track, ...) is
+  transcoded to a temporary PCM WAV via **ffmpeg** if it is installed and on
+  `PATH` (override its location with the `AE_FFMPEG_PATH` env var); the
+  temporary file is removed after analysis. Uncompressed WAV still goes
+  through the original, dependency-free path unchanged. If ffmpeg is not
+  installed, the tool now reports that explicitly instead of a generic
+  "unsupported format" error.
+
 ## [1.7.4] - 2026-07-13
 
 ### Added

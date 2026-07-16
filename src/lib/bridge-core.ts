@@ -196,6 +196,37 @@ export function tail(s: string, maxChars: number = 4000): string {
   return s.length > maxChars ? s.slice(s.length - maxChars) : s;
 }
 
+/**
+ * Build the ffmpeg argument list that transcodes any input audio/video file to
+ * a 16-bit PCM WAV at `outputPath`, without forcing a sample rate or channel
+ * count (ffmpeg keeps the source's own values). Split out from the actual
+ * spawnSync call so the exact arguments can be unit tested without invoking a
+ * real ffmpeg binary.
+ *
+ * `-protocol_whitelist file` restricts ffmpeg's input URL layer to plain local
+ * files: `inputPath` reaches this function as a caller-supplied string, and
+ * without the whitelist ffmpeg would otherwise honor it as `http://`,
+ * `concat:`, `subfile:`, etc. if it happened to look like one, fetching a
+ * network resource or reading an unintended local file instead of the
+ * expected audio file. A normal absolute/relative path (including a Windows
+ * drive letter) is unaffected: ffmpeg only treats a URL prefix as a protocol
+ * scheme when it is longer than one character, so this never changes
+ * behavior for real file paths, only closes off protocol confusion.
+ */
+export function buildFfmpegConvertArgs(inputPath: string, outputPath: string): string[] {
+  return [
+    "-y",
+    "-protocol_whitelist",
+    "file",
+    "-i",
+    inputPath,
+    "-vn",
+    "-acodec",
+    "pcm_s16le",
+    outputPath,
+  ];
+}
+
 /** Smallest gap between result-file polls, in ms (the fast first checks). */
 export const POLL_START_MS = 40;
 
