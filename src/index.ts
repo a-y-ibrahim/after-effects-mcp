@@ -24,6 +24,12 @@ import {
 import { collectPresetFiles } from "./lib/preset-scan.js";
 import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
 import { buildFrameContent, type FrameFile, type ContentBlock } from "./lib/see-frame.js";
+import {
+  amplitudeAtTime,
+  buildPeakKeyframes,
+  buildWaveformKeyframes,
+  type Keyframe,
+} from "./lib/audio-reactive.js";
 
 const server = new McpServer({
   name: "AfterEffectsServer",
@@ -1860,6 +1866,62 @@ function convertToWavWithFfmpeg(ffmpegPath: string, inputPath: string): string {
   return outputPath;
 }
 
+type AudioLoadResult = { ok: true; analysis: WavAnalysis } | { ok: false; errorMessage: string };
+
+// Shared by analyze-audio-waveform and animate-to-audio: read filePath as PCM
+// WAV natively, or fall back to an ffmpeg-transcoded temporary WAV. Keeping
+// the WAV-native + ffmpeg-fallback + temp-file-cleanup logic in exactly one
+// place means the two tools can never drift apart on what audio input they
+// accept.
+function loadAudioAnalysis(filePath: string, numPoints: number): AudioLoadResult {
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, errorMessage: `File not found: ${filePath}` };
+  }
+
+  let convertedPath: string | null = null;
+  try {
+    let result = analyzeWavAmplitudes(filePath, numPoints);
+
+    if (!result) {
+      const ffmpegPath = findFfmpeg();
+      if (!ffmpegPath) {
+        return {
+          ok: false,
+          errorMessage:
+            "Could not parse this file as PCM WAV, and ffmpeg (needed to convert other formats like mp3/m4a/aac/ogg) was not found on PATH. Install ffmpeg, or set the AE_FFMPEG_PATH env var to its full path.",
+        };
+      }
+      try {
+        convertedPath = convertToWavWithFfmpeg(ffmpegPath, filePath);
+      } catch (conversionError) {
+        return {
+          ok: false,
+          errorMessage: `ffmpeg could not convert this file to WAV: ${String(conversionError)}`,
+        };
+      }
+      result = analyzeWavAmplitudes(convertedPath, numPoints);
+    }
+
+    if (!result) {
+      return {
+        ok: false,
+        errorMessage:
+          "Could not parse audio file, even after ffmpeg conversion. The format may be unsupported or the file may be corrupt.",
+      };
+    }
+
+    return { ok: true, analysis: result };
+  } finally {
+    if (convertedPath) {
+      try {
+        fs.unlinkSync(convertedPath);
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
+  }
+}
+
 server.tool(
   "get-audio-info",
   "Get audio metadata, source file path, existing markers, and audio level keyframes for a layer in After Effects.",
@@ -1899,73 +1961,20 @@ server.tool(
       .describe("Number of amplitude samples to return (default: 200). Higher = more detail."),
   },
   async ({ filePath, numPoints = 200 }) => {
-    let convertedPath: string | null = null;
     try {
-      if (!fs.existsSync(filePath)) {
+      const loaded = loadAudioAnalysis(filePath, numPoints);
+      if (!loaded.ok) {
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ status: "error", message: `File not found: ${filePath}` }),
+              text: JSON.stringify({ status: "error", message: loaded.errorMessage }),
             },
           ],
           isError: true,
         };
       }
-
-      let result = analyzeWavAmplitudes(filePath, numPoints);
-
-      if (!result) {
-        const ffmpegPath = findFfmpeg();
-        if (!ffmpegPath) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  status: "error",
-                  message:
-                    "Could not parse this file as PCM WAV, and ffmpeg (needed to convert other formats like mp3/m4a/aac/ogg) was not found on PATH. Install ffmpeg, or set the AE_FFMPEG_PATH env var to its full path.",
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-        try {
-          convertedPath = convertToWavWithFfmpeg(ffmpegPath, filePath);
-        } catch (conversionError) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  status: "error",
-                  message: `ffmpeg could not convert this file to WAV: ${String(conversionError)}`,
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-        result = analyzeWavAmplitudes(convertedPath, numPoints);
-      }
-
-      if (!result) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                status: "error",
-                message:
-                  "Could not parse audio file, even after ffmpeg conversion. The format may be unsupported or the file may be corrupt.",
-              }),
-            },
-          ],
-          isError: true,
-        };
-      }
+      const result = loaded.analysis;
 
       return {
         content: [
@@ -1994,14 +2003,270 @@ server.tool(
         content: [{ type: "text", text: `Error analyzing waveform: ${String(error)}` }],
         isError: true,
       };
-    } finally {
-      if (convertedPath) {
-        try {
-          fs.unlinkSync(convertedPath);
-        } catch {
-          /* best-effort cleanup */
-        }
+    }
+  },
+);
+
+// animate-to-audio's keyframeOptions: a deliberately trimmed subset of the
+// graph/easing shape set-effect-property and set-effect-keyframe expose
+// (kept as an independent copy here, not a shared import, so this new tool
+// cannot change behavior for those two already-shipped tools). Applied
+// uniformly to every generated keyframe, so per-key controls that only make
+// sense one keyframe at a time - roving, per-direction easeIn/easeOut speed
+// and influence, spatial tangents/continuity/auto-bezier for path-shaped
+// properties - are left out; follow up with set-effect-property or
+// setLayerKeyframe on an individual keyframe afterward if one of those is
+// needed.
+const KeyframeGraphOptionsSchema = z
+  .object({
+    easyEase: z.boolean().optional().describe("Apply Easy Ease to every generated keyframe."),
+    easyEaseInfluence: z
+      .number()
+      .min(0.1)
+      .max(100)
+      .optional()
+      .describe("Influence used when easyEase is true (default: 33.333)."),
+    interpolationIn: z
+      .enum(["linear", "bezier", "hold"])
+      .optional()
+      .describe("Incoming interpolation type."),
+    interpolationOut: z
+      .enum(["linear", "bezier", "hold"])
+      .optional()
+      .describe("Outgoing interpolation type."),
+    temporalContinuous: z.boolean().optional().describe("Enable or disable temporal continuity."),
+    temporalAutoBezier: z.boolean().optional().describe("Enable or disable temporal auto-bezier."),
+  })
+  .optional()
+  .describe(
+    "Optional graph/easing controls applied uniformly to every keyframe this call generates.",
+  );
+
+const MAX_AUDIO_KEYFRAMES = 2000;
+
+server.tool(
+  "animate-to-audio",
+  "Generate After Effects keyframes for a layer property directly from an audio file's waveform, in one call - no need to call analyze-audio-waveform and compute keyframes by hand first. Two modes: 'waveform' follows the amplitude envelope continuously (a VU-meter style effect - glow intensity, scale, or opacity riding the music), one keyframe per analyzed sample. 'peaks' pulses the property at each detected transient/beat and decays back to baseline (a beat-pop style effect - e.g. a logo scaling up on every kick). Accepts any audio format ffmpeg supports (mp3, m4a/aac, ogg, flac, ...) the same way analyze-audio-waveform does; uncompressed WAV needs no extra dependency. Targets a plain layer property (e.g. 'ADBE Opacity') by default, or an effect's property when effectIndex/effectName/effectMatchName is given.",
+  {
+    filePath: z
+      .string()
+      .describe("Absolute path to the audio file (obtained from get-audio-info sourceFilePath)."),
+    mode: z
+      .enum(["waveform", "peaks"])
+      .optional()
+      .describe(
+        "'waveform' (default): continuous amplitude-follow. 'peaks': discrete pulse-and-decay at each detected transient.",
+      ),
+    numPoints: z
+      .number()
+      .int()
+      .positive()
+      .max(500)
+      .optional()
+      .describe(
+        "Waveform samples to analyze, each becoming one keyframe in 'waveform' mode (default: 100). Ignored for keyframe generation in 'peaks' mode (still used to detect the peaks themselves), where the number of keyframes instead follows how many transients are detected. Kept well below analyze-audio-waveform's own cap since every point here becomes a real After Effects keyframe.",
+      ),
+    compName: z
+      .string()
+      .optional()
+      .describe("Name of the target composition. Preferred over compIndex when both are given."),
+    compIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based composition index, used if compName is not given."),
+    layerIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based index of the target layer within the composition."),
+    layerName: z
+      .string()
+      .optional()
+      .describe("Name of the target layer (alternative to layerIndex)."),
+    effectIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "1-based index of the effect in the layer's Effects group, to target an effect property instead of a plain layer property.",
+      ),
+    effectName: z.string().optional().describe("Display name of the effect to target."),
+    effectMatchName: z.string().optional().describe("Internal matchName of the effect to target."),
+    propertyPath: z
+      .array(z.union([z.string(), z.number().int().positive()]))
+      .optional()
+      .describe(
+        "Path to the target property, from the effect root (if an effect selector is given) or from the layer root otherwise, e.g. ['Compositing Options', 'Effect Opacity'] or [3, 1].",
+      ),
+    propertyName: z
+      .string()
+      .optional()
+      .describe(
+        "Target property name or matchName (e.g. 'ADBE Opacity', 'ADBE Scale', 'ADBE Rotate Z' - matchNames are locale-independent and preferred). Used when propertyPath is not given, or as the effect-property fallback.",
+      ),
+    propertyIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Fallback target property index under the effect root (effect targeting only)."),
+    outputMin: z
+      .number()
+      .describe(
+        "Property value at silence/rest (waveform amplitude 0, or peaks-mode baseline between hits).",
+      ),
+    outputMax: z
+      .number()
+      .describe(
+        "Property value at full amplitude (waveform amplitude 1, or peaks-mode value at the instant of a hit).",
+      ),
+    curve: z
+      .enum(["linear", "exponential", "logarithmic"])
+      .optional()
+      .describe(
+        "Response shaping (default: linear). 'exponential' emphasizes loud peaks (punchier); 'logarithmic' boosts quiet-passage detail. In 'peaks' mode this only affects velocitySensitivePeaks scaling.",
+      ),
+    smoothingWindow: z
+      .number()
+      .int()
+      .positive()
+      .max(50)
+      .optional()
+      .describe(
+        "Waveform mode only: moving-average window (in samples) to smooth out jittery amplitude before keyframing (default: 3, use 1 to disable).",
+      ),
+    startTime: z
+      .number()
+      .optional()
+      .describe(
+        "Seconds to offset every generated keyframe by, to start the animation partway through the comp (default: 0).",
+      ),
+    peakDecaySeconds: z
+      .number()
+      .positive()
+      .optional()
+      .describe(
+        "Peaks mode only: seconds to fall back to outputMin after each hit (default: 0.15).",
+      ),
+    velocitySensitivePeaks: z
+      .boolean()
+      .optional()
+      .describe(
+        "Peaks mode only: scale each hit's height by how loud that specific transient was, instead of every hit jumping to the same outputMax (default: true).",
+      ),
+    clearExisting: z
+      .boolean()
+      .optional()
+      .describe("Remove the property's existing keyframes first (default: true)."),
+    keyframeOptions: KeyframeGraphOptionsSchema,
+  },
+  async (params) => {
+    try {
+      const numPoints = params.numPoints ?? 100;
+      const loaded = loadAudioAnalysis(params.filePath, numPoints);
+      if (!loaded.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ status: "error", message: loaded.errorMessage }),
+            },
+          ],
+          isError: true,
+        };
       }
+      const analysis = loaded.analysis;
+      const mode = params.mode ?? "waveform";
+      const startTime = params.startTime ?? 0;
+      const curve = params.curve;
+
+      let keyframes: Keyframe[];
+      if (mode === "waveform") {
+        keyframes = buildWaveformKeyframes(analysis.waveformPoints, {
+          outputMin: params.outputMin,
+          outputMax: params.outputMax,
+          curve,
+          smoothingWindow: params.smoothingWindow ?? 3,
+          startTime,
+        });
+      } else {
+        const velocitySensitive = params.velocitySensitivePeaks ?? true;
+        const peakAmplitudes = velocitySensitive
+          ? analysis.peakTimes.map((t) => amplitudeAtTime(analysis.waveformPoints, t))
+          : undefined;
+        keyframes = buildPeakKeyframes(
+          analysis.peakTimes,
+          {
+            baselineValue: params.outputMin,
+            peakValue: params.outputMax,
+            decaySeconds: params.peakDecaySeconds ?? 0.15,
+            startTime,
+            curve,
+          },
+          peakAmplitudes,
+        );
+      }
+
+      if (keyframes.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message:
+                  mode === "peaks"
+                    ? "No transients/peaks were detected in this audio, so no keyframes were generated."
+                    : "No waveform samples were available to keyframe.",
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (keyframes.length > MAX_AUDIO_KEYFRAMES) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message: `This would set ${keyframes.length} keyframes, over the ${MAX_AUDIO_KEYFRAMES} limit (After Effects gets sluggish with very dense keyframe data). In 'waveform' mode, reduce numPoints. In 'peaks' mode, the count follows how many transients were detected in this audio (not directly tunable here) - try a shorter audio clip, or switch to 'waveform' mode with a lower numPoints instead.`,
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const bridgeArgs = {
+        compName: params.compName,
+        compIndex: params.compIndex,
+        layerIndex: params.layerIndex,
+        layerName: params.layerName,
+        effectIndex: params.effectIndex,
+        effectName: params.effectName,
+        effectMatchName: params.effectMatchName,
+        propertyPath: params.propertyPath,
+        propertyName: params.propertyName,
+        propertyIndex: params.propertyIndex,
+        clearExisting: params.clearExisting,
+        keyframeOptions: params.keyframeOptions,
+        keyframes,
+      };
+
+      const result = await sendBridgeCommand("animateToAudio", bridgeArgs, 15000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error animating to audio: ${String(error)}` }],
+        isError: true,
+      };
     }
   },
 );
@@ -2057,7 +2322,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.7.4-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.9.0-mcp-enhanced";
 
 server.tool(
   "check-bridge",

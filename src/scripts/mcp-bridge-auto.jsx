@@ -1468,6 +1468,137 @@ function setEffectKeyframe(args) {
     return setEffectProperty(args);
 }
 
+// Resolve the target property the same way setLayerKeyframe/setEffectProperty
+// do (effect + path/name when an effect selector is given, else Transform
+// Group -> Effect Parade -> Text Properties by name/matchName), but shared
+// here so setPropertyKeyframesBatch can target either a plain layer property
+// or an effect property from one function.
+function _resolvePropertyForKeyframing(layer, args) {
+    var propertyPath = normalizePropertyPath(args.propertyPath);
+
+    if (args.effectIndex !== undefined || args.effectName || args.effectMatchName) {
+        var effect = resolveEffectOnLayer(layer, args);
+        var target = propertyPath.length > 0 ? resolvePropertyPath(effect, propertyPath) : null;
+        if (!target && args.propertyName) {
+            target = findPropertyByNameOrMatchName(effect, args.propertyName);
+        }
+        if (!target && args.propertyIndex) {
+            target = effect.property(args.propertyIndex);
+        }
+        return target;
+    }
+
+    if (propertyPath.length > 0) {
+        return resolvePropertyPath(layer, propertyPath);
+    }
+
+    if (args.propertyName) {
+        // _transformProp routes through "ADBE Transform Group" first (falling
+        // back to a direct layer.property() call for layer types that have no
+        // transform group at all) - the pattern the 1.7.4 fix established for
+        // every other transform-property access, so this stays consistent
+        // instead of re-introducing the direct-lookup bug that fix addressed.
+        var prop = _transformProp(layer, args.propertyName);
+        if (!prop) {
+            var fxGroup = layer.property("ADBE Effect Parade");
+            if (fxGroup) prop = fxGroup.property(args.propertyName);
+        }
+        if (!prop) {
+            var textGroup = layer.property("ADBE Text Properties");
+            if (textGroup) prop = textGroup.property(args.propertyName);
+        }
+        return prop;
+    }
+
+    return null;
+}
+
+// Set many keyframes on one property from a single call - the batch
+// counterpart to setLayerKeyframe/setEffectKeyframe, built for animate-to-audio
+// so a whole audio-driven animation (which can be hundreds of keyframes) is
+// one bridge round-trip and one undo step, not hundreds of each.
+function setPropertyKeyframesBatch(args) {
+    try {
+        var params = args || {};
+        var comp = _resolveComp(params);
+        if (!comp) {
+            return JSON.stringify({ status: "error", message: "Composition not found. Provide compName or compIndex, or open a comp." });
+        }
+        var layer = _resolveLayer(comp, params);
+        if (!layer) {
+            return JSON.stringify({ status: "error", message: "Layer not found. Provide layerIndex or layerName." });
+        }
+
+        var targetProperty = _resolvePropertyForKeyframing(layer, params);
+        if (!targetProperty) {
+            return JSON.stringify({ status: "error", message: "Target property not found. Provide propertyName, propertyPath, or an effect selector (effectIndex/effectName/effectMatchName)." });
+        }
+
+        if (!targetProperty.canVaryOverTime) {
+            return JSON.stringify({ status: "error", message: "Property '" + targetProperty.name + "' cannot be keyframed." });
+        }
+
+        var keyframes = params.keyframes;
+        if (!(keyframes instanceof Array) || keyframes.length === 0) {
+            return JSON.stringify({ status: "error", message: "keyframes must be a non-empty array of { time, value }." });
+        }
+
+        var clearExisting = params.clearExisting !== false;
+        if (clearExisting) {
+            while (targetProperty.numKeys > 0) { targetProperty.removeKey(1); }
+        }
+
+        // Bucket the times we're about to set (rounded to the same epsilon
+        // findKeyIndexAtTime uses elsewhere) so graph/easing options below are
+        // applied only to the keyframes this call just created, never to any
+        // pre-existing ones left in place by clearExisting:false.
+        var setTimes = {};
+        var setCount = 0;
+        for (var i = 0; i < keyframes.length; i++) {
+            var kf = keyframes[i];
+            if (!kf || kf.time === undefined || kf.time === null || kf.value === undefined) continue;
+            var t = Number(kf.time);
+            targetProperty.setValueAtTime(t, coerceScriptValue(kf.value));
+            setTimes[t.toFixed(4)] = true;
+            setCount++;
+        }
+
+        if (setCount === 0) {
+            return JSON.stringify({ status: "error", message: "No valid { time, value } entries were found in keyframes." });
+        }
+
+        var keyframeOptions = getKeyframeOptionsFromArgs(params);
+        var hasGraphOptions = false;
+        for (var gk in keyframeOptions) {
+            if (keyframeOptions.hasOwnProperty(gk)) { hasGraphOptions = true; break; }
+        }
+
+        if (hasGraphOptions) {
+            for (var k = 1; k <= targetProperty.numKeys; k++) {
+                var kt = targetProperty.keyTime(k);
+                if (setTimes.hasOwnProperty(kt.toFixed(4))) {
+                    applyKeyframeGraphOptions(targetProperty, k, keyframeOptions);
+                }
+            }
+        }
+
+        return JSON.stringify({
+            status: "success",
+            message: "Set " + setCount + " keyframe(s) on '" + targetProperty.name + "'.",
+            composition: { name: comp.name },
+            layer: { name: layer.name, index: layer.index },
+            property: { name: targetProperty.name, matchName: targetProperty.matchName },
+            keyframesSet: setCount,
+            totalKeyframeCount: targetProperty.numKeys
+        }, null, 2);
+    } catch (error) {
+        return JSON.stringify({
+            status: "error",
+            message: error.toString() + (error.line ? " (Line: " + error.line + ")" : "")
+        }, null, 2);
+    }
+}
+
 function applyLayerPreset(args) {
     try {
         var resolved = resolveCompAndLayer(args || {});
@@ -2410,7 +2541,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.7.4-mcp-enhanced";
+var BRIDGE_VERSION = "1.9.0-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3562,6 +3693,11 @@ function executeCommand(command, args) {
                 logToPanel("Calling setEffectKeyframe function...");
                 result = setEffectKeyframe(args);
                 logToPanel("Returned from setEffectKeyframe.");
+                break;
+            case "animateToAudio":
+                logToPanel("Calling setPropertyKeyframesBatch function...");
+                result = setPropertyKeyframesBatch(args);
+                logToPanel("Returned from setPropertyKeyframesBatch.");
                 break;
             case "applyLayerPreset":
                 logToPanel("Calling applyLayerPreset function...");

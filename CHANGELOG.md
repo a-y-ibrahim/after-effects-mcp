@@ -6,6 +6,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-07-16
+
+### Added
+
+- **`animate-to-audio`**: generate After Effects keyframes for a layer or
+  effect property directly from an audio file's waveform, in one call. Two
+  modes: `waveform` follows the amplitude envelope continuously (e.g. glow
+  intensity, scale, or opacity riding the music); `peaks` pulses the property
+  at each detected transient/beat and decays back to a baseline, optionally
+  scaling each hit's height by how loud that specific transient was
+  (`velocitySensitivePeaks`). Accepts any audio format `analyze-audio-waveform`
+  does (PCM WAV natively, anything else via ffmpeg). Every keyframe from one
+  call is sent to the bridge and set in a single round-trip and a single undo
+  step, regardless of how many there are. `analyze-audio-waveform`'s own
+  WAV-native-plus-ffmpeg-fallback logic was extracted into a shared
+  `loadAudioAnalysis` helper so both tools stay in sync on which audio input
+  they accept.
+
 ## [1.8.0] - 2026-07-16
 
 ### Added
