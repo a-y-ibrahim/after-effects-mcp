@@ -6,6 +6,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-19
+
+### Added
+
+- **`animate-from-data`**: generate After Effects keyframes for a layer or
+  effect property directly from an arbitrary numeric time series - stock
+  prices, sensor readings, scores, survey results, anything time-ordered and
+  numeric, no audio involved. Accepts either explicit `{time, value}` points
+  (`data`) or an evenly-spaced series (`values` + `interval`). Each raw value
+  is normalized using `[inputMin, inputMax]` (auto-detected from the series
+  when not given) and mapped to `[outputMin, outputMax]`, reusing the same
+  response-curve shaping and moving-average smoothing `animate-to-audio`
+  uses. Targets a plain layer property or an effect property via the same
+  scheme `animate-to-audio` and `set-effect-property` already use (now
+  shared between the two audio/data tools as one `PropertyTargetSchema`).
+  Reuses `animate-to-audio`'s bridge-side keyframe-batching handler
+  unchanged - it was already fully generic - so no ExtendScript changes were
+  needed; registered under its own `setPropertyKeyframesBatch` bridge
+  command name for a self-documenting dispatch table. Bumps the bridge
+  protocol to `1.10.0-mcp-enhanced`.
+
 ## [1.9.0] - 2026-07-16
 
 ### Added

@@ -30,6 +30,11 @@ import {
   buildWaveformKeyframes,
   type Keyframe,
 } from "./lib/audio-reactive.js";
+import {
+  buildDataSeriesKeyframes,
+  evenlySpacedPoints,
+  type DataPoint,
+} from "./lib/data-keyframes.js";
 
 const server = new McpServer({
   name: "AfterEffectsServer",
@@ -2042,7 +2047,68 @@ const KeyframeGraphOptionsSchema = z
     "Optional graph/easing controls applied uniformly to every keyframe this call generates.",
   );
 
-const MAX_AUDIO_KEYFRAMES = 2000;
+// Property-targeting fields shared by every tool that ends up calling the
+// bridge's generic setPropertyKeyframesBatch command (animate-to-audio,
+// animate-from-data, and any future one): which comp, which layer, and which
+// property on it (a plain layer property, or an effect's property when an
+// effect selector is given). Kept as one spreadable object so the field set
+// and its wording can't drift between tools that share the exact same
+// targeting semantics.
+const PropertyTargetSchema = {
+  compName: z
+    .string()
+    .optional()
+    .describe("Name of the target composition. Preferred over compIndex when both are given."),
+  compIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("1-based composition index, used if compName is not given."),
+  layerIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("1-based index of the target layer within the composition."),
+  layerName: z
+    .string()
+    .optional()
+    .describe("Name of the target layer (alternative to layerIndex)."),
+  effectIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "1-based index of the effect in the layer's Effects group, to target an effect property instead of a plain layer property.",
+    ),
+  effectName: z.string().optional().describe("Display name of the effect to target."),
+  effectMatchName: z.string().optional().describe("Internal matchName of the effect to target."),
+  propertyPath: z
+    .array(z.union([z.string(), z.number().int().positive()]))
+    .optional()
+    .describe(
+      "Path to the target property, from the effect root (if an effect selector is given) or from the layer root otherwise, e.g. ['Compositing Options', 'Effect Opacity'] or [3, 1].",
+    ),
+  propertyName: z
+    .string()
+    .optional()
+    .describe(
+      "Target property name or matchName (e.g. 'ADBE Opacity', 'ADBE Scale', 'ADBE Rotate Z' - matchNames are locale-independent and preferred). Used when propertyPath is not given, or as the effect-property fallback.",
+    ),
+  propertyIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Fallback target property index under the effect root (effect targeting only)."),
+};
+
+// Upper bound on keyframes any single setPropertyKeyframesBatch call may
+// generate, regardless of which tool is calling it - After Effects gets
+// sluggish with very dense keyframe data on one property.
+const MAX_BATCH_KEYFRAMES = 2000;
 
 server.tool(
   "animate-to-audio",
@@ -2066,61 +2132,16 @@ server.tool(
       .describe(
         "Waveform samples to analyze, each becoming one keyframe in 'waveform' mode (default: 100). Ignored for keyframe generation in 'peaks' mode (still used to detect the peaks themselves), where the number of keyframes instead follows how many transients are detected. Kept well below analyze-audio-waveform's own cap since every point here becomes a real After Effects keyframe.",
       ),
-    compName: z
-      .string()
-      .optional()
-      .describe("Name of the target composition. Preferred over compIndex when both are given."),
-    compIndex: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe("1-based composition index, used if compName is not given."),
-    layerIndex: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe("1-based index of the target layer within the composition."),
-    layerName: z
-      .string()
-      .optional()
-      .describe("Name of the target layer (alternative to layerIndex)."),
-    effectIndex: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe(
-        "1-based index of the effect in the layer's Effects group, to target an effect property instead of a plain layer property.",
-      ),
-    effectName: z.string().optional().describe("Display name of the effect to target."),
-    effectMatchName: z.string().optional().describe("Internal matchName of the effect to target."),
-    propertyPath: z
-      .array(z.union([z.string(), z.number().int().positive()]))
-      .optional()
-      .describe(
-        "Path to the target property, from the effect root (if an effect selector is given) or from the layer root otherwise, e.g. ['Compositing Options', 'Effect Opacity'] or [3, 1].",
-      ),
-    propertyName: z
-      .string()
-      .optional()
-      .describe(
-        "Target property name or matchName (e.g. 'ADBE Opacity', 'ADBE Scale', 'ADBE Rotate Z' - matchNames are locale-independent and preferred). Used when propertyPath is not given, or as the effect-property fallback.",
-      ),
-    propertyIndex: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe("Fallback target property index under the effect root (effect targeting only)."),
+    ...PropertyTargetSchema,
     outputMin: z
       .number()
+      .finite()
       .describe(
         "Property value at silence/rest (waveform amplitude 0, or peaks-mode baseline between hits).",
       ),
     outputMax: z
       .number()
+      .finite()
       .describe(
         "Property value at full amplitude (waveform amplitude 1, or peaks-mode value at the instant of a hit).",
       ),
@@ -2141,6 +2162,7 @@ server.tool(
       ),
     startTime: z
       .number()
+      .finite()
       .optional()
       .describe(
         "Seconds to offset every generated keyframe by, to start the animation partway through the comp (default: 0).",
@@ -2148,6 +2170,7 @@ server.tool(
     peakDecaySeconds: z
       .number()
       .positive()
+      .finite()
       .optional()
       .describe(
         "Peaks mode only: seconds to fall back to outputMin after each hit (default: 0.15).",
@@ -2229,14 +2252,14 @@ server.tool(
         };
       }
 
-      if (keyframes.length > MAX_AUDIO_KEYFRAMES) {
+      if (keyframes.length > MAX_BATCH_KEYFRAMES) {
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
                 status: "error",
-                message: `This would set ${keyframes.length} keyframes, over the ${MAX_AUDIO_KEYFRAMES} limit (After Effects gets sluggish with very dense keyframe data). In 'waveform' mode, reduce numPoints. In 'peaks' mode, the count follows how many transients were detected in this audio (not directly tunable here) - try a shorter audio clip, or switch to 'waveform' mode with a lower numPoints instead.`,
+                message: `This would set ${keyframes.length} keyframes, over the ${MAX_BATCH_KEYFRAMES} limit (After Effects gets sluggish with very dense keyframe data). In 'waveform' mode, reduce numPoints. In 'peaks' mode, the count follows how many transients were detected in this audio (not directly tunable here) - try a shorter audio clip, or switch to 'waveform' mode with a lower numPoints instead.`,
               }),
             },
           ],
@@ -2265,6 +2288,214 @@ server.tool(
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error animating to audio: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "animate-from-data",
+  "Generate After Effects keyframes for a layer property directly from an arbitrary numeric data series - stock prices, sensor readings, scores, survey results, or any other time-ordered numbers (not audio; see animate-to-audio for that). Provide either `data` (explicit {time, value} points) or `values` + `interval` (an evenly-spaced series with an implied time step) - not both. Each raw value is normalized using [inputMin, inputMax] (auto-detected from the series when not given, so an unknown-range series still maps cleanly) and mapped to [outputMin, outputMax], with the same optional response curve and smoothing animate-to-audio uses. Targets a plain layer property (e.g. 'ADBE Opacity') by default, or an effect's property when effectIndex/effectName/effectMatchName is given.",
+  {
+    data: z
+      .array(z.object({ time: z.number().finite(), value: z.number().finite() }))
+      .max(MAX_BATCH_KEYFRAMES)
+      .optional()
+      .describe(
+        `Explicit {time, value} points, in seconds and raw data units (max ${MAX_BATCH_KEYFRAMES}, one point becomes one keyframe). Does not need to be pre-sorted by time. Provide this or values+interval, not both.`,
+      ),
+    values: z
+      .array(z.number().finite())
+      .max(MAX_BATCH_KEYFRAMES)
+      .optional()
+      .describe(
+        `Raw values for an evenly-spaced series (one every \`interval\` seconds, starting at \`startTime\`; max ${MAX_BATCH_KEYFRAMES}). Provide this with interval, or use \`data\` instead for explicit per-point times.`,
+      ),
+    interval: z
+      .number()
+      .positive()
+      .finite()
+      .optional()
+      .describe("Seconds between consecutive `values` entries. Required when `values` is given."),
+    inputMin: z
+      .number()
+      .finite()
+      .optional()
+      .describe(
+        "Raw data value mapped to outputMin. Auto-detected from the series (after smoothing) when omitted.",
+      ),
+    inputMax: z
+      .number()
+      .finite()
+      .optional()
+      .describe(
+        "Raw data value mapped to outputMax. Auto-detected from the series (after smoothing) when omitted.",
+      ),
+    ...PropertyTargetSchema,
+    outputMin: z
+      .number()
+      .finite()
+      .describe(
+        "Property value at inputMin (or the series' lowest point, when inputMin is not given).",
+      ),
+    outputMax: z
+      .number()
+      .finite()
+      .describe(
+        "Property value at inputMax (or the series' highest point, when inputMax is not given).",
+      ),
+    curve: z
+      .enum(["linear", "exponential", "logarithmic"])
+      .optional()
+      .describe(
+        "Response shaping (default: linear). 'exponential' emphasizes high values; 'logarithmic' boosts low-value detail.",
+      ),
+    smoothingWindow: z
+      .number()
+      .int()
+      .positive()
+      .max(50)
+      .optional()
+      .describe(
+        "Moving-average window (in samples) applied to raw values before mapping, to smooth out noisy data (default: 1 = no smoothing).",
+      ),
+    startTime: z
+      .number()
+      .finite()
+      .optional()
+      .describe(
+        "Seconds to offset every generated keyframe by. In `values` mode this is also where the series starts (default: 0).",
+      ),
+    clearExisting: z
+      .boolean()
+      .optional()
+      .describe("Remove the property's existing keyframes first (default: true)."),
+    keyframeOptions: KeyframeGraphOptionsSchema,
+  },
+  async (params) => {
+    try {
+      const hasData = !!params.data && params.data.length > 0;
+      const hasValues = !!params.values && params.values.length > 0;
+
+      if (hasData && hasValues) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message: "Provide either data or values, not both.",
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      let points: DataPoint[];
+      // `values` mode already bakes startTime into each point via
+      // evenlySpacedPoints; applying it again in buildDataSeriesKeyframes
+      // would double-offset, so only `data` mode (explicit times) still
+      // needs it applied there.
+      let startTimeAlreadyApplied = false;
+
+      if (params.data && params.data.length > 0) {
+        points = params.data;
+      } else if (params.values && params.values.length > 0) {
+        if (params.interval === undefined) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  status: "error",
+                  message: "interval is required when values is given.",
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        points = evenlySpacedPoints(params.values, params.interval, params.startTime ?? 0);
+        startTimeAlreadyApplied = true;
+      } else {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message:
+                  "Provide a non-empty data array, or a non-empty values array with interval.",
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const keyframes = buildDataSeriesKeyframes(points, {
+        outputMin: params.outputMin,
+        outputMax: params.outputMax,
+        curve: params.curve,
+        inputMin: params.inputMin,
+        inputMax: params.inputMax,
+        smoothingWindow: params.smoothingWindow ?? 1,
+        startTime: startTimeAlreadyApplied ? 0 : (params.startTime ?? 0),
+      });
+
+      if (keyframes.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message: "No data points were available to keyframe.",
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (keyframes.length > MAX_BATCH_KEYFRAMES) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message: `This would set ${keyframes.length} keyframes, over the ${MAX_BATCH_KEYFRAMES} limit (After Effects gets sluggish with very dense keyframe data). Provide fewer data points.`,
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const bridgeArgs = {
+        compName: params.compName,
+        compIndex: params.compIndex,
+        layerIndex: params.layerIndex,
+        layerName: params.layerName,
+        effectIndex: params.effectIndex,
+        effectName: params.effectName,
+        effectMatchName: params.effectMatchName,
+        propertyPath: params.propertyPath,
+        propertyName: params.propertyName,
+        propertyIndex: params.propertyIndex,
+        clearExisting: params.clearExisting,
+        keyframeOptions: params.keyframeOptions,
+        keyframes,
+      };
+
+      const result = await sendBridgeCommand("setPropertyKeyframesBatch", bridgeArgs, 15000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error animating from data: ${String(error)}` }],
         isError: true,
       };
     }
@@ -2322,7 +2553,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.9.0-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.10.0-mcp-enhanced";
 
 server.tool(
   "check-bridge",

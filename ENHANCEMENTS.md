@@ -207,8 +207,44 @@ does both steps in one call and one round-trip:
 into a shared `loadAudioAnalysis` helper so this tool and `analyze-audio-waveform` can
 never drift apart on which audio input they accept.
 
-Current bridge protocol: `1.9.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in the
-`.jsx` and `EXPECTED_BRIDGE_VERSION` in `index.ts`; `check-bridge` warns on any mismatch).
+### 10. `animate-from-data`: keyframes generated from any numeric series, not just audio (v1.10.0)
+
+Same idea as `animate-to-audio`, generalized: any time-ordered numeric data - stock
+prices, sensor readings, scores, survey results - can drive a property the same way,
+with no audio involved at all.
+
+- Two input shapes: `data` (explicit `{time, value}` points, sorted automatically) or
+  `values` + `interval` (an evenly-spaced series with an implied time step). Exactly
+  one of the two is required; giving both is a validation error, not a silent pick.
+- Each raw value is normalized using `[inputMin, inputMax]` - auto-detected from the
+  series (after smoothing) when not given, so a series with an unknown range still
+  maps cleanly - then mapped to `[outputMin, outputMax]`, reusing the exact same
+  curve-shaping (`linear` / `exponential` / `logarithmic`) and moving-average
+  smoothing `animate-to-audio` uses. A flat/degenerate input range (every value
+  identical, or an explicit `inputMin === inputMax`) maps to the output range's
+  midpoint instead of dividing by zero.
+- Same property-targeting scheme as `animate-to-audio` (plain layer property or an
+  effect's property), extracted into one shared `PropertyTargetSchema` both tools
+  spread into their input schema, so the field set and its wording can't drift
+  between the two.
+- Reuses `animate-to-audio`'s bridge command handler (`setPropertyKeyframesBatch` on
+  the ExtendScript side) unchanged - that function was already fully generic, with
+  nothing audio-specific in it, so this tool required zero ExtendScript changes.
+  Registered under its own bridge command name (`setPropertyKeyframesBatch`, matching
+  the ExtendScript function name 1:1) rather than reusing `animate-to-audio`'s
+  audio-flavored command name, so the dispatch table stays self-documenting.
+- The value-mapping/smoothing math (`mapAmplitudeToValue`, `smoothAmplitudes`) lives
+  in `lib/audio-reactive.ts` and is imported as-is rather than duplicated - it was
+  never actually audio-specific, only its callers were. `lib/data-keyframes.ts` holds
+  this tool's own data-series-specific logic (sorting, range auto-detection, point
+  construction from `values`+`interval`).
+
+Current bridge protocol: `1.10.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
+the `.jsx`, `EXPECTED_BRIDGE_VERSION` in `index.ts`, and the version quoted in both
+READMEs' "first test" section; `check-bridge` warns on a `BRIDGE_VERSION`/
+`EXPECTED_BRIDGE_VERSION` mismatch but the README copies aren't checked by anything -
+grep for the old version string across `README.md`/`README.ar.md`/`ENHANCEMENTS.md`
+when bumping it, this has gone stale twice already).
 
 ## Activate the changes (after pulling/building this fork)
 

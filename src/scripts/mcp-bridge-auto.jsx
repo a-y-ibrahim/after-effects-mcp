@@ -1514,9 +1514,12 @@ function _resolvePropertyForKeyframing(layer, args) {
 }
 
 // Set many keyframes on one property from a single call - the batch
-// counterpart to setLayerKeyframe/setEffectKeyframe, built for animate-to-audio
-// so a whole audio-driven animation (which can be hundreds of keyframes) is
-// one bridge round-trip and one undo step, not hundreds of each.
+// counterpart to setLayerKeyframe/setEffectKeyframe. Takes a plain
+// { time, value } array with no assumption about where it came from, so a
+// whole data-driven animation (which can be hundreds of keyframes, from
+// audio or any other numeric series) is one bridge round-trip and one undo
+// step, not hundreds of each. Used by both the "animateToAudio" and
+// "setPropertyKeyframesBatch" bridge commands (see the dispatcher below).
 function setPropertyKeyframesBatch(args) {
     try {
         var params = args || {};
@@ -2541,7 +2544,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.9.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.10.0-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3695,6 +3698,12 @@ function executeCommand(command, args) {
                 logToPanel("Returned from setEffectKeyframe.");
                 break;
             case "animateToAudio":
+            case "setPropertyKeyframesBatch":
+                // Both names call the same generic keyframe-batch function -
+                // "animateToAudio" is animate-to-audio's command (kept as-is
+                // for that already-shipped tool), "setPropertyKeyframesBatch"
+                // is the generic name any other caller (e.g. animate-from-data)
+                // uses, since this function has no audio-specific logic at all.
                 logToPanel("Calling setPropertyKeyframesBatch function...");
                 result = setPropertyKeyframesBatch(args);
                 logToPanel("Returned from setPropertyKeyframesBatch.");
