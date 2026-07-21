@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1](https://github.com/a-y-ibrahim/after-effects-mcp/compare/after-effects-mcp-v1.10.0...after-effects-mcp-v1.10.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* verify release-please labeling works end-to-end in production (temporary, will be reverted) ([047c2c1](https://github.com/a-y-ibrahim/after-effects-mcp/commit/047c2c1f171841d1e6bc68013c9e8484930f12f9))
+
 ## [Unreleased]
 
 ## [1.10.0] - 2026-07-19
