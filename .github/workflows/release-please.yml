@@ -1,0 +1,26 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+# Uses RELEASE_PLEASE_TOKEN (a PAT), not the default GITHUB_TOKEN: GitHub
+# deliberately does not let the default token's actions trigger other
+# workflows, so a GitHub Release created with it would silently NOT fire
+# publish.yml. A PAT does not have that restriction.
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
