@@ -6,6 +6,7 @@ import {
   buildFrameContent,
   sampleTimes,
   gridLayout,
+  isCompletePng,
 } from "../src/lib/see-frame";
 
 describe("normalizeTimes", () => {
@@ -147,5 +148,33 @@ describe("buildFrameContent", () => {
     const blocks = buildFrameContent("Intro", [{ time: 0, path: "/a.png" }], read);
     expect((blocks[0] as { text: string }).text).toContain("1 frame");
     expect((blocks[0] as { text: string }).text).not.toContain("frames");
+  });
+});
+
+describe("isCompletePng", () => {
+  const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const IEND_CHUNK = [0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
+  const minimalPng = (middle: number[] = []) =>
+    Uint8Array.from([...SIGNATURE, ...middle, ...IEND_CHUNK]);
+
+  it("accepts a structurally complete PNG (signature + IEND trailer)", () => {
+    expect(isCompletePng(minimalPng())).toBe(true);
+    expect(isCompletePng(minimalPng([1, 2, 3, 4, 5, 6, 7, 8, 9]))).toBe(true);
+  });
+
+  it("rejects a truncated PNG missing its IEND trailer", () => {
+    const full = minimalPng([1, 2, 3, 4]);
+    const truncated = full.slice(0, full.length - 5);
+    expect(isCompletePng(truncated)).toBe(false);
+  });
+
+  it("rejects an empty or too-short buffer", () => {
+    expect(isCompletePng(Uint8Array.from([]))).toBe(false);
+    expect(isCompletePng(Uint8Array.from(SIGNATURE))).toBe(false);
+  });
+
+  it("rejects a non-PNG buffer even if it happens to end with the IEND bytes", () => {
+    const notPng = Uint8Array.from([...new TextEncoder().encode("hello   "), ...IEND_CHUNK]);
+    expect(isCompletePng(notPng)).toBe(false);
   });
 });

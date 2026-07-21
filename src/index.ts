@@ -23,7 +23,12 @@ import {
 } from "./lib/bridge-core.js";
 import { collectPresetFiles } from "./lib/preset-scan.js";
 import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
-import { buildFrameContent, type FrameFile, type ContentBlock } from "./lib/see-frame.js";
+import {
+  buildFrameContent,
+  isCompletePng,
+  type FrameFile,
+  type ContentBlock,
+} from "./lib/see-frame.js";
 import {
   amplitudeAtTime,
   buildPeakKeyframes,
@@ -3234,13 +3239,13 @@ server.tool(
             : JSON.stringify(parsed.state)
           : undefined;
 
-      const readBase64 = (p: string): string | null => {
-        try {
-          return fs.readFileSync(p).toString("base64");
-        } catch {
-          return null;
-        }
-      };
+      const b64ByPath = new Map<string, string>();
+      for (const f of frames) {
+        if (!f || !f.path) continue;
+        const b64 = await readScratchPngBase64(f.path);
+        if (b64 !== null) b64ByPath.set(f.path, b64);
+      }
+      const readBase64 = (p: string): string | null => b64ByPath.get(p) ?? null;
 
       const content: ContentBlock[] = buildFrameContent(compName, frames, readBase64, stateJson);
       if (parsed.note) content.push({ type: "text", text: String(parsed.note) });
@@ -3264,13 +3269,34 @@ server.tool(
   },
 );
 
+// saveFrameToPng returns before the render finishes: After Effects queues the
+// frame and writes the PNG asynchronously, so the bridge result JSON usually
+// arrives before the file exists on disk, and an early read can even succeed
+// with a truncated PNG (observed on AE 2026 / Windows; the ExtendScript side
+// works around the same lag with _importWithRetry). Poll until the file is a
+// structurally complete PNG before accepting the bytes. The timeout is generous
+// because a multi-frame batch renders sequentially after the script returns.
+async function readScratchPngBase64(p: string, timeoutMs = 15000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const buf = fs.readFileSync(p);
+      if (isCompletePng(buf)) return buf.toString("base64");
+    } catch {
+      // not written yet
+    }
+    if (Date.now() >= deadline) return null;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 // Read scratch PNGs listed in a bridge result into MCP image blocks, then delete
 // them. Shared by contact-sheet and match-reference.
-function imageResultFromPaths(
+async function imageResultFromPaths(
   raw: string,
   entries: Array<{ path?: string; caption: string }>,
   headerText: string,
-): { content: ContentBlock[]; isError?: boolean } {
+): Promise<{ content: ContentBlock[]; isError?: boolean }> {
   const cleanup: string[] = [];
   try {
     let parsed: any;
@@ -3286,12 +3312,7 @@ function imageResultFromPaths(
     for (const e of entries) {
       if (!e.path) continue;
       cleanup.push(e.path);
-      let b64: string | null = null;
-      try {
-        b64 = fs.readFileSync(e.path).toString("base64");
-      } catch {
-        b64 = null;
-      }
+      const b64 = await readScratchPngBase64(e.path);
       if (b64) {
         content.push({ type: "text", text: e.caption });
         content.push({ type: "image", data: b64, mimeType: "image/png" });
