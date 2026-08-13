@@ -239,7 +239,52 @@ with no audio involved at all.
   this tool's own data-series-specific logic (sorting, range auto-detection, point
   construction from `values`+`interval`).
 
-Current bridge protocol: `1.10.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
+### 11. `populate-template`: bulk-generate compositions from a data table (v1.11.0)
+
+Bulk/batch version of hand-editing one composition: duplicate a template comp once
+per row of a data table, populating each duplicate from that row's values -
+personalized ads, product cards, name badges, anything repeated with different
+content per instance.
+
+- One `bindings` entry per layer to populate, applied to every row. Three kinds:
+  `text` (a text layer's content, with the exact same Arabic/RTL auto-detection
+  `localize-comp` uses), `footage` (an AV layer's source, replaced with a file
+  imported from that row's value), `property` (any layer or effect property,
+  reusing the same targeting scheme `animate-to-audio`/`animate-from-data` already
+  use - matchName, `propertyPath`, or an effect selector).
+- Layers nested inside precompositions are reachable via `path`, identical shape to
+  `localize-comp`'s own `path`. Each precomposition on that path is duplicated at
+  most once **per row** (never edited in place) even when multiple bindings in that
+  row share it, and a row's precomp duplicates are never shared with any other
+  row's - this is the exact precomp-duplication invariant `localize-comp` already
+  relied on, extracted into a shared `_resolveLayerViaDuplicatedPath` helper both
+  tools now call, rather than copied. `localize-comp`'s own behavior and output are
+  unchanged by this extraction (same duplicate-naming suffix, same skip/update
+  reporting shape).
+- `namePattern` names each created composition from that row's own values (e.g.
+  `"{name} ad"`); falls back to `"<template name> <row number>"` when omitted, or
+  when a referenced field is missing from that particular row, rather than leaving
+  a literal unresolved `{field}` in the name.
+- Every binding's outcome (success or a specific failure reason) is reported per
+  row, per binding, rather than the call succeeding or failing as one unit - a
+  missing field in one row, or one bad layer path, doesn't hide whether the other
+  49 rows in a 50-row batch worked.
+- Deliberately does not render anything itself: chain with `render-aerender` once
+  per created composition afterward for batch output, the same "do one thing,
+  let the caller chain it" split `analyze-audio-waveform` /
+  `animate-to-audio` / `render-aerender` already use.
+- A `footage` binding checks the target layer can actually take a replaced
+  source _before_ importing anything, so a binding aimed at the wrong layer
+  type doesn't leave an unused, never-attached import sitting in the project
+  panel. Imports are also cached by file path across the whole call (not
+  reset per row), so 500 rows all reusing the same background image import
+  that file once, not 500 times.
+- Capped at 500 rows (`MAX_TEMPLATE_ROWS`) - each row is a full composition
+  duplication (plus any precomps on a used path, plus any footage imports), so an
+  unbounded row count would risk exactly the kind of AE slowdown the keyframe-count
+  caps on `animate-to-audio`/`animate-from-data` already guard against.
+
+Current bridge protocol: `1.11.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
 the `.jsx`, `EXPECTED_BRIDGE_VERSION` in `index.ts`, and the version quoted in both
 READMEs' "first test" section; `check-bridge` warns on a `BRIDGE_VERSION`/
 `EXPECTED_BRIDGE_VERSION` mismatch but the README copies aren't checked by anything -

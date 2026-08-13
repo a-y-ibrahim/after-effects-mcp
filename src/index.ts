@@ -2553,7 +2553,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.10.0-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.11.0-mcp-enhanced";
 
 server.tool(
   "check-bridge",
@@ -2780,6 +2780,133 @@ server.tool(
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error localizing composition: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+const PopulateTemplateBindingSchema = z.object({
+  field: z.string().describe("Key in each row supplying this binding's value."),
+  kind: z
+    .enum(["text", "footage", "property"])
+    .describe(
+      "'text': set a text layer's content (RTL auto-detected, same as localize-comp). 'footage': replace an AV layer's source with a file imported from this value (an absolute file path). 'property': set any layer or effect property to this value.",
+    ),
+  layerIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("1-based layer index at the template's top level. Ignored if `path` is given."),
+  layerName: z
+    .string()
+    .optional()
+    .describe("Layer name at the template's top level. Ignored if `path` is given."),
+  path: z
+    .array(
+      z.object({
+        layerIndex: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("1-based layer index at this nesting level."),
+        layerName: z.string().optional().describe("Layer name at this nesting level."),
+      }),
+    )
+    .min(1)
+    .optional()
+    .describe(
+      "Full path to a layer nested inside one or more precompositions, same shape as localize-comp's `path`: every segment but the last must resolve to a precomposition layer. Omit to target a top-level layer with layerIndex/layerName instead.",
+    ),
+  direction: z
+    .enum(["auto", "rtl", "ltr"])
+    .optional()
+    .describe("`text` kind only. 'auto' (default) = RTL when the value contains Arabic."),
+  alignment: z
+    .enum(["left", "center", "right"])
+    .optional()
+    .describe("`text` kind only. Defaults to 'right' when the resolved direction is RTL."),
+  propertyName: z
+    .string()
+    .optional()
+    .describe(
+      "`property` kind only: target property name or matchName (e.g. 'ADBE Opacity'). Used when propertyPath is not given, or as the effect-property fallback.",
+    ),
+  propertyPath: z
+    .array(z.union([z.string(), z.number().int().positive()]))
+    .optional()
+    .describe(
+      "`property` kind only: path to the target property, from the effect root or the layer root.",
+    ),
+  propertyIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "`property` kind only: fallback property index under the effect root (effect targeting only).",
+    ),
+  effectIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "`property` kind only: 1-based effect index, to target an effect property instead of a plain layer property.",
+    ),
+  effectName: z
+    .string()
+    .optional()
+    .describe("`property` kind only: display name of the effect to target."),
+  effectMatchName: z
+    .string()
+    .optional()
+    .describe("`property` kind only: internal matchName of the effect to target."),
+});
+
+const MAX_TEMPLATE_ROWS = 500;
+
+server.tool(
+  "populate-template",
+  "Duplicate a template composition once per row of a data table, populating each duplicate from that row's values - the batch/bulk version of manually editing one composition (personalized ads, product cards, name badges, anything repeated with different content). Each row can drive text content (with the same Arabic/RTL auto-detection as localize-comp), an image/video source (imported from a file path), or any layer/effect property value (reusing the same targeting scheme animate-to-audio/animate-from-data use). Layers nested inside precompositions are reachable via `path`, and each precomposition on that path is safely duplicated per row (never edited in place), reusing the same precomp-duplication logic localize-comp uses. Chain with render-aerender afterward, once per created composition, to batch-render every variant.",
+  {
+    compName: z
+      .string()
+      .optional()
+      .describe("Template composition name (or the active comp if omitted)."),
+    compIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based index among compositions, if compName is omitted."),
+    rows: z
+      .array(z.record(z.string(), z.union([z.string(), z.number().finite(), z.boolean()])))
+      .min(1)
+      .max(MAX_TEMPLATE_ROWS)
+      .describe(
+        `One entry per output composition (max ${MAX_TEMPLATE_ROWS}, one row becomes one duplicated composition). Each row is a flat {field: value} object; \`bindings\` below decides which fields drive which layers.`,
+      ),
+    bindings: z
+      .array(PopulateTemplateBindingSchema)
+      .min(1)
+      .describe("One entry per layer to populate. Applied to every row."),
+    namePattern: z
+      .string()
+      .optional()
+      .describe(
+        "Name for each created composition, with {field} placeholders substituted from that row's values (e.g. '{name} ad'). Defaults to '<template name> <row number>', also used as the fallback if a placeholder's field is missing from a row.",
+      ),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("populateTemplate", parameters, 120000, 500);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error populating template: ${String(error)}` }],
         isError: true,
       };
     }

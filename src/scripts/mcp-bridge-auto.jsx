@@ -147,6 +147,68 @@ function createTextLayer(args) {
 // other layer, effect, and animation carries over untouched because the whole
 // comp (not just individual layers) is duplicated first. Translation itself is
 // the caller's job; args.translations already carries the target-language text.
+// Walk `path` (an array of {layerIndex,layerName} segments, all but the last
+// must be precomposition layers) through `startComp`. A precomp is never
+// edited in place: every precomp on the path is duplicated the first time
+// it's reached, and the layer that pointed at it is repointed to the
+// duplicate via replaceSource. `dupeState` (an object with `precompDupes`,
+// `knownDuplicateIds`, and a `suffix` string appended to each duplicate's
+// name) must be shared across every path walked in one call, so a precomp
+// referenced by more than one path is duplicated exactly once:
+//  - precompDupes: original item id -> its duplicate, for when two DIFFERENT
+//    layers both source the same original precomp (e.g. two instances of the
+//    same lower-third).
+//  - knownDuplicateIds: id of every duplicate this call has already created,
+//    for when the SAME layer is walked again by a later path - by then its
+//    `.source` IS the duplicate (the first walk already called
+//    replaceSource), not the original, so looking it up in precompDupes
+//    would miss and duplicate it a second time, silently orphaning the
+//    first path's work.
+// Returns { layer, targetComp } on success, or { failReason } if any segment
+// fails to resolve (never throws, so a caller can report a single bad path
+// without aborting the rest of a batch).
+function _resolveLayerViaDuplicatedPath(startComp, path, dupeState) {
+    var targetComp = startComp;
+    for (var p = 0; p < path.length - 1; p++) {
+        var midLayer = _resolveLayer(targetComp, path[p]);
+        if (!midLayer) return { failReason: "path[" + p + "]: layer not found" };
+        if (!(midLayer.source && midLayer.source instanceof CompItem)) {
+            return { failReason: "path[" + p + "]: not a precomposition layer" };
+        }
+        var src = midLayer.source;
+        var srcKey = String(src.id);
+        // AE auto-renames a layer to match its source whenever the layer has
+        // no custom name of its own, so replaceSource() below can silently
+        // rename e.g. "Scene" to "Scene (localized)". Capture the name now
+        // and restore it after the swap so a later path in this same call
+        // can still resolve this segment by its original layerName.
+        var midLayerName = midLayer.name;
+        var dupPrecomp;
+        if (dupeState.knownDuplicateIds[srcKey]) {
+            // Already repointed to a duplicate by an earlier path this call -
+            // reuse it as-is, nothing to do.
+            dupPrecomp = src;
+        } else if (dupeState.precompDupes[srcKey]) {
+            // The original has already been duplicated once (a different
+            // layer shares it) - point this layer at that same duplicate.
+            dupPrecomp = dupeState.precompDupes[srcKey];
+            midLayer.replaceSource(dupPrecomp, false);
+            midLayer.name = midLayerName;
+        } else {
+            dupPrecomp = src.duplicate();
+            dupPrecomp.name = src.name + dupeState.suffix;
+            dupeState.precompDupes[srcKey] = dupPrecomp;
+            dupeState.knownDuplicateIds[String(dupPrecomp.id)] = true;
+            midLayer.replaceSource(dupPrecomp, false);
+            midLayer.name = midLayerName;
+        }
+        targetComp = dupPrecomp;
+    }
+    var layer = _resolveLayer(targetComp, path[path.length - 1]);
+    if (!layer) return { failReason: "layer not found" };
+    return { layer: layer, targetComp: targetComp };
+}
+
 function localizeComp(args) {
     try {
         var comp = _resolveComp(args);
@@ -160,22 +222,7 @@ function localizeComp(args) {
         var newComp = comp.duplicate();
         newComp.name = args.newCompName || (comp.name + " (localized)");
 
-        // A precomp is never edited in place: every precomp on every path is
-        // duplicated the first time it is reached, and the layer that pointed
-        // at it is repointed to the duplicate. Two maps track this so a precomp
-        // is duplicated exactly once even when several translation paths pass
-        // through it:
-        //  - precompDupes: original item id -> its localized duplicate, for
-        //    when two DIFFERENT layers both source the same original precomp
-        //    (e.g. two instances of the same lower-third).
-        //  - knownDuplicateIds: id of every duplicate this call has already
-        //    created, for when the SAME layer is walked again by a later
-        //    translation - by then its `.source` IS the duplicate (the first
-        //    walk already called replaceSource), not the original, so looking
-        //    it up in precompDupes would miss and duplicate it a second time,
-        //    silently orphaning the first translation's work.
-        var precompDupes = {};
-        var knownDuplicateIds = {};
+        var dupeState = { precompDupes: {}, knownDuplicateIds: {}, suffix: " (localized)" };
 
         var updated = [];
         var skipped = [];
@@ -185,55 +232,13 @@ function localizeComp(args) {
             // (the same shape localize-comp shipped with originally).
             var path = t.path && t.path.length ? t.path : [{ layerIndex: t.layerIndex, layerName: t.layerName }];
 
-            var targetComp = newComp;
-            var failReason = null;
-            for (var p = 0; p < path.length - 1; p++) {
-                var midLayer = _resolveLayer(targetComp, path[p]);
-                if (!midLayer) { failReason = "path[" + p + "]: layer not found"; break; }
-                if (!(midLayer.source && midLayer.source instanceof CompItem)) {
-                    failReason = "path[" + p + "]: not a precomposition layer";
-                    break;
-                }
-                var src = midLayer.source;
-                var srcKey = String(src.id);
-                // AE auto-renames a layer to match its source whenever the layer
-                // has no custom name of its own, so replaceSource() below can
-                // silently rename e.g. "Scene" to "Scene (localized)". Capture the
-                // name now and restore it after the swap so a later translation
-                // in this same call can still resolve this path segment by its
-                // original layerName.
-                var midLayerName = midLayer.name;
-                var dupPrecomp;
-                if (knownDuplicateIds[srcKey]) {
-                    // Already repointed to a localized duplicate by an earlier
-                    // translation this call - reuse it as-is, nothing to do.
-                    dupPrecomp = src;
-                } else if (precompDupes[srcKey]) {
-                    // The original has already been duplicated once (a different
-                    // layer shares it) - point this layer at that same duplicate.
-                    dupPrecomp = precompDupes[srcKey];
-                    midLayer.replaceSource(dupPrecomp, false);
-                    midLayer.name = midLayerName;
-                } else {
-                    dupPrecomp = src.duplicate();
-                    dupPrecomp.name = src.name + " (localized)";
-                    precompDupes[srcKey] = dupPrecomp;
-                    knownDuplicateIds[String(dupPrecomp.id)] = true;
-                    midLayer.replaceSource(dupPrecomp, false);
-                    midLayer.name = midLayerName;
-                }
-                targetComp = dupPrecomp;
-            }
-            if (failReason) {
-                skipped.push({ path: path, reason: failReason });
+            var resolved = _resolveLayerViaDuplicatedPath(newComp, path, dupeState);
+            if (resolved.failReason) {
+                skipped.push({ path: path, reason: resolved.failReason });
                 continue;
             }
-
-            var layer = _resolveLayer(targetComp, path[path.length - 1]);
-            if (!layer) {
-                skipped.push({ path: path, reason: "layer not found" });
-                continue;
-            }
+            var layer = resolved.layer;
+            var targetComp = resolved.targetComp;
             if (!(layer instanceof TextLayer)) {
                 skipped.push({ path: path, reason: "not a text layer" });
                 continue;
@@ -251,8 +256,8 @@ function localizeComp(args) {
         }
 
         var precompNames = [];
-        for (var key in precompDupes) {
-            if (precompDupes.hasOwnProperty(key)) precompNames.push(precompDupes[key].name);
+        for (var key in dupeState.precompDupes) {
+            if (dupeState.precompDupes.hasOwnProperty(key)) precompNames.push(dupeState.precompDupes[key].name);
         }
 
         return JSON.stringify({
@@ -263,6 +268,132 @@ function localizeComp(args) {
             precompsDuplicated: precompNames,
             updated: updated,
             skipped: skipped
+        }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
+// Build a composition name from `pattern` (e.g. "{name} ad"), substituting
+// each {field} placeholder with that field's value from `row`. Falls back to
+// "<source name> <row number>" when no pattern is given, or when a
+// referenced field is missing from the row - never returns a name with a
+// literal unresolved "{field}" left in it, which would read as a bug to
+// whoever sees the resulting composition list.
+function _buildTemplateName(pattern, row, rowIndex, sourceName) {
+    var fallback = sourceName + " " + (rowIndex + 1);
+    if (!pattern) return fallback;
+    var missingField = false;
+    var name = pattern.replace(/\{([^{}]+)\}/g, function (match, field) {
+        if (!row.hasOwnProperty(field)) { missingField = true; return match; }
+        return String(row[field]);
+    });
+    return missingField ? fallback : name;
+}
+
+function populateTemplate(args) {
+    try {
+        var params = args || {};
+        var comp = _resolveComp(params);
+        if (!comp) return JSON.stringify({ status: "error", message: "No composition found. Provide compName or compIndex, or open a comp." });
+
+        var rows = params.rows;
+        if (!(rows instanceof Array) || rows.length === 0) {
+            return JSON.stringify({ status: "error", message: "rows must be a non-empty array of data objects." });
+        }
+        var bindings = params.bindings;
+        if (!(bindings instanceof Array) || bindings.length === 0) {
+            return JSON.stringify({ status: "error", message: "bindings must be a non-empty array." });
+        }
+
+        // Shared across every row (not reset per row): a "footage" binding whose
+        // value is the same file path in two different rows - a background image
+        // reused across every variant, say - imports that file exactly once and
+        // reuses the same project item for every replaceSource() call, rather
+        // than importing a fresh duplicate item per row.
+        var footageCache = {};
+
+        var results = [];
+        for (var r = 0; r < rows.length; r++) {
+            var row = rows[r] || {};
+            var newComp = comp.duplicate();
+            newComp.name = _buildTemplateName(params.namePattern, row, r, comp.name);
+
+            // Fresh per row: each row's precomps are duplicated independently of
+            // every other row's, never shared - only bindings WITHIN one row
+            // reuse a precomp duplicate when their paths cross the same one.
+            var dupeState = { precompDupes: {}, knownDuplicateIds: {}, suffix: " (template)" };
+            var bindingResults = [];
+
+            for (var b = 0; b < bindings.length; b++) {
+                var binding = bindings[b] || {};
+                var field = binding.field;
+                if (!field || !row.hasOwnProperty(field)) {
+                    bindingResults.push({ field: field, status: "error", message: "Row is missing field '" + field + "'." });
+                    continue;
+                }
+                var value = row[field];
+
+                var path = binding.path && binding.path.length ? binding.path : [{ layerIndex: binding.layerIndex, layerName: binding.layerName }];
+                var resolved = _resolveLayerViaDuplicatedPath(newComp, path, dupeState);
+                if (resolved.failReason) {
+                    bindingResults.push({ field: field, status: "error", message: resolved.failReason });
+                    continue;
+                }
+                var layer = resolved.layer;
+
+                try {
+                    if (binding.kind === "text") {
+                        if (!(layer instanceof TextLayer)) throw new Error("Target layer is not a text layer.");
+                        var textProp = layer.property("ADBE Text Properties").property("ADBE Text Document");
+                        var textDocument = textProp.value;
+                        var textValue = String(value);
+                        textDocument.text = textValue;
+                        var isRtl = _applyTextDirection(textDocument, textValue, binding.direction);
+                        var align = binding.alignment || (isRtl ? "right" : null);
+                        if (align === "left") { textDocument.justification = ParagraphJustification.LEFT_JUSTIFY; }
+                        else if (align === "center") { textDocument.justification = ParagraphJustification.CENTER_JUSTIFY; }
+                        else if (align === "right") { textDocument.justification = ParagraphJustification.RIGHT_JUSTIFY; }
+                        textProp.setValue(textDocument);
+                    } else if (binding.kind === "footage") {
+                        // Checked before importing anything: a layer that can't
+                        // take a replaced source shouldn't leave an unused,
+                        // never-attached import sitting in the project panel.
+                        if (!layer.source) throw new Error("Target layer has no replaceable source (not a footage-backed layer).");
+                        var footagePath = String(value);
+                        var importedItem = footageCache[footagePath];
+                        if (!importedItem) {
+                            var footageFile = new File(footagePath);
+                            if (!footageFile.exists) throw new Error("Footage file not found: " + footagePath);
+                            importedItem = app.project.importFile(new ImportOptions(footageFile));
+                            footageCache[footagePath] = importedItem;
+                        }
+                        layer.replaceSource(importedItem, false);
+                    } else if (binding.kind === "property") {
+                        var targetProperty = _resolvePropertyForKeyframing(layer, binding);
+                        if (!targetProperty) throw new Error("Target property not found. Provide propertyName, propertyPath, or an effect selector.");
+                        targetProperty.setValue(coerceScriptValue(value));
+                    } else {
+                        throw new Error("Unknown binding kind '" + binding.kind + "'. Use 'text', 'footage', or 'property'.");
+                    }
+                    bindingResults.push({ field: field, status: "success", layer: { name: layer.name, index: layer.index } });
+                } catch (bindingError) {
+                    bindingResults.push({ field: field, status: "error", message: bindingError.toString() });
+                }
+            }
+
+            results.push({
+                row: r,
+                comp: { name: newComp.name, index: newComp.index },
+                bindings: bindingResults
+            });
+        }
+
+        return JSON.stringify({
+            status: "success",
+            message: "Created " + results.length + " composition(s) from " + rows.length + " row(s).",
+            sourceComp: { name: comp.name, index: comp.index },
+            created: results
         }, null, 2);
     } catch (error) {
         return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
@@ -2544,7 +2675,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.10.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.11.0-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3641,6 +3772,11 @@ function executeCommand(command, args) {
                 logToPanel("Calling localizeComp function...");
                 result = localizeComp(args);
                 logToPanel("Returned from localizeComp.");
+                break;
+            case "populateTemplate":
+                logToPanel("Calling populateTemplate function...");
+                result = populateTemplate(args);
+                logToPanel("Returned from populateTemplate.");
                 break;
             case "createShapeLayer":
                 logToPanel("Calling createShapeLayer function...");
