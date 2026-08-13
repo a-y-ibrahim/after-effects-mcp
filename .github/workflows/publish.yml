@@ -34,9 +34,20 @@ jobs:
 
       - name: Verify package.json version matches the release tag
         run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
           PKG_VERSION="v$(node -p "require('./package.json').version")"
           TAG_NAME="${{ github.event.release.tag_name }}"
-          if [ "$PKG_VERSION" != "$TAG_NAME" ]; then
+          # release-please's tag format depends on include-component-in-tag in
+          # release-please-config.json ("vX.Y.Z" when false, "<package>-vX.Y.Z"
+          # when true or unset - true is release-please's own default). Strip
+          # that optional package-name prefix before comparing, so this check
+          # stays correct either way instead of hard-failing every publish if
+          # that setting ever changes (caught live: a v1.11.0 release publish
+          # failed here when the config didn't set it, tagging
+          # "after-effects-mcp-v1.11.0" against this check's un-stripped
+          # "v1.11.0" expectation).
+          TAG_VERSION="${TAG_NAME#"$PKG_NAME"-}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
             echo "package.json version ($PKG_VERSION) does not match the release tag ($TAG_NAME)"
             exit 1
           fi
