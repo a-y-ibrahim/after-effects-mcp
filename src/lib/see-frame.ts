@@ -76,6 +76,28 @@ export function scratchFramePath(dir: string, commandId: string, index: number):
 }
 
 /**
+ * Structural completeness check for a PNG byte buffer. After Effects'
+ * saveFrameToPng returns before the render finishes and writes the PNG
+ * asynchronously, so a reader polling the scratch folder can observe a missing
+ * or partially-written file. A complete PNG starts with the 8-byte PNG
+ * signature and ends with the IEND chunk, whose trailing 8 bytes ("IEND" plus
+ * its constant CRC) are invariant across all PNGs.
+ */
+export function isCompletePng(buf: Uint8Array): boolean {
+  const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const IEND_TAIL = [0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
+  if (buf.length < SIGNATURE.length + 12) return false;
+  for (let i = 0; i < SIGNATURE.length; i++) {
+    if (buf[i] !== SIGNATURE[i]) return false;
+  }
+  const off = buf.length - IEND_TAIL.length;
+  for (let i = 0; i < IEND_TAIL.length; i++) {
+    if (buf[off + i] !== IEND_TAIL[i]) return false;
+  }
+  return true;
+}
+
+/**
  * Sample N evenly-spaced times across [0, duration] for a contact sheet. Returns
  * the midpoints of N equal segments (so no frame sits exactly at t=0 or t=dur,
  * which often render empty at the very edges). count is clamped to [1, 64].
