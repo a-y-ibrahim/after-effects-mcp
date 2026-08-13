@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.1](https://github.com/a-y-ibrahim/after-effects-mcp/compare/v1.11.0...v1.11.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* wait for asynchronously written frame PNGs before reading them ([#14](https://github.com/a-y-ibrahim/after-effects-mcp/issues/14)) ([96c00e2](https://github.com/a-y-ibrahim/after-effects-mcp/commit/96c00e2ca03c29e0599637eab04f353961307e35))
+
+
+### Performance Improvements
+
+* poll scratch PNGs concurrently in see-frame/contact-sheet/match-reference ([e2cef9e](https://github.com/a-y-ibrahim/after-effects-mcp/commit/e2cef9ecdac6c0c48e804e66236992597296916f))
+
 ## [1.11.0](https://github.com/a-y-ibrahim/after-effects-mcp/compare/v1.10.0...v1.11.0) (2026-08-13)
 
 
