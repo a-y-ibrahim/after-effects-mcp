@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0](https://github.com/a-y-ibrahim/after-effects-mcp/compare/after-effects-mcp-v1.10.0...after-effects-mcp-v1.11.0) (2026-08-13)
+
+
+### Features
+
+* add populate-template for bulk composition generation from data ([95edd33](https://github.com/a-y-ibrahim/after-effects-mcp/commit/95edd339900a56e51d02adc43a83547c35a34030))
+
+
+### Bug Fixes
+
+* verify release-please labeling works end-to-end in production (temporary, will be reverted) ([047c2c1](https://github.com/a-y-ibrahim/after-effects-mcp/commit/047c2c1f171841d1e6bc68013c9e8484930f12f9))
+
+
+### Reverts
+
+* remove temporary release-please verification commit ([1e21bce](https://github.com/a-y-ibrahim/after-effects-mcp/commit/1e21bceb6953f558f82bc6d87900264eda8cee34))
+
 ## [Unreleased]
 
 ## [1.10.0] - 2026-07-19
