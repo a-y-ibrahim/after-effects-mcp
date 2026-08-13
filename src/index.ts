@@ -3367,11 +3367,12 @@ server.tool(
           : undefined;
 
       const b64ByPath = new Map<string, string>();
-      for (const f of frames) {
-        if (!f || !f.path) continue;
-        const b64 = await readScratchPngBase64(f.path);
-        if (b64 !== null) b64ByPath.set(f.path, b64);
-      }
+      const framePaths = frames.filter((f) => f && f.path).map((f) => f.path);
+      const b64Results = await Promise.all(framePaths.map((p) => readScratchPngBase64(p)));
+      framePaths.forEach((p, i) => {
+        const b64 = b64Results[i];
+        if (b64 !== null) b64ByPath.set(p, b64);
+      });
       const readBase64 = (p: string): string | null => b64ByPath.get(p) ?? null;
 
       const content: ContentBlock[] = buildFrameContent(compName, frames, readBase64, stateJson);
@@ -3436,15 +3437,16 @@ async function imageResultFromPaths(
       return bridgeToolResult(raw) as { content: ContentBlock[]; isError?: boolean };
     }
     const content: ContentBlock[] = [{ type: "text", text: headerText }];
-    for (const e of entries) {
-      if (!e.path) continue;
-      cleanup.push(e.path);
-      const b64 = await readScratchPngBase64(e.path);
+    const withPaths = entries.filter((e): e is { path: string; caption: string } => !!e.path);
+    withPaths.forEach((e) => cleanup.push(e.path));
+    const b64Results = await Promise.all(withPaths.map((e) => readScratchPngBase64(e.path)));
+    withPaths.forEach((e, i) => {
+      const b64 = b64Results[i];
       if (b64) {
         content.push({ type: "text", text: e.caption });
         content.push({ type: "image", data: b64, mimeType: "image/png" });
       }
-    }
+    });
     if (parsed.note) content.push({ type: "text", text: String(parsed.note) });
     const anyImage = content.some((b) => b.type === "image");
     return { content, isError: anyImage ? false : true };
