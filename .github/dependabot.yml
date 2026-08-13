@@ -5,6 +5,14 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Dependabot's own PR titles aren't Conventional-Commits-shaped by
+    # default ("Bump x from 1 to 2"), which pr-title-lint.yml rejects and
+    # release-please can't classify. "chore" also means these bumps don't
+    # trigger a release on their own - they ride along with whatever
+    # feat:/fix: work ships next, which is the right default for routine
+    # dependency bumps with no behavior change of their own.
+    commit-message:
+      prefix: "chore"
     groups:
       minor-and-patch:
         update-types:
@@ -21,3 +29,5 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "chore"
