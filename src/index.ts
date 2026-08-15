@@ -2558,7 +2558,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.11.0-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.12.0-mcp-enhanced";
 
 server.tool(
   "check-bridge",
@@ -2872,6 +2872,8 @@ const PopulateTemplateBindingSchema = z.object({
 });
 
 const MAX_TEMPLATE_ROWS = 500;
+const MAX_PROJECT_ITEMS_LISTED = 2000;
+const MAX_IMPORT_FILES = 200;
 
 server.tool(
   "populate-template",
@@ -2912,6 +2914,105 @@ server.tool(
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error populating template: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "import-footage",
+  "Import one or more files into the project as footage items, ready to use as a layer source or in populate-template's footage bindings. Files that don't exist are reported individually without failing the rest of the batch.",
+  {
+    paths: z
+      .array(z.string())
+      .min(1)
+      .max(MAX_IMPORT_FILES)
+      .describe(
+        `Absolute file paths to import (max ${MAX_IMPORT_FILES}). Each becomes one project item, unless asSequence is set.`,
+      ),
+    folderName: z
+      .string()
+      .optional()
+      .describe(
+        "Name of a top-level project panel folder to place the imported item(s) in. Created if it doesn't already exist.",
+      ),
+    asSequence: z
+      .boolean()
+      .optional()
+      .describe(
+        "Import all of paths as a single image sequence item instead of one item per file (paths should be the consecutive frames of one sequence).",
+      ),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("importFootage", parameters, 30000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error importing footage: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "list-project-items",
+  "List items in the project panel (compositions, footage, solids, folders), with each footage item's source file path and whether it is missing/offline. Unlike getProjectInfo (summary-only, capped at 50), this is the full, filterable inventory - use it to find broken links before a render, or to look up a footage item's id for relink-footage.",
+  {
+    type: z
+      .enum(["all", "composition", "footage", "folder", "solid", "placeholder"])
+      .optional()
+      .describe("Filter by item type (default: all)."),
+    missingOnly: z
+      .boolean()
+      .optional()
+      .describe("Only return footage items whose source file is currently missing/offline."),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_PROJECT_ITEMS_LISTED)
+      .optional()
+      .describe(`Maximum items to return (default and max ${MAX_PROJECT_ITEMS_LISTED}).`),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("listProjectItems", parameters, 15000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error listing project items: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "relink-footage",
+  "Relink a footage item's source to a different file on disk, without touching how it's used in any composition (every layer using it keeps working, now pointing at the new file). Select the item by itemId (from list-project-items, unambiguous) or itemName (must match exactly one item).",
+  {
+    itemId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Project item id (from list-project-items). Preferred - unambiguous."),
+    itemName: z
+      .string()
+      .optional()
+      .describe("Project item name, if itemId is omitted. Must match exactly one project item."),
+    newPath: z.string().describe("Absolute path to the replacement file."),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("relinkFootage", parameters, 15000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error relinking footage: ${String(error)}` }],
         isError: true,
       };
     }

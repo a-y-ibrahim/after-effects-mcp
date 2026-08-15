@@ -400,6 +400,211 @@ function populateTemplate(args) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Project asset management: import footage, inventory project items, relink
+// missing/offline sources. Distinct from populateTemplate's footage binding
+// above (which swaps what a LAYER points to via replaceSource) - these
+// operate on the project panel itself.
+// ---------------------------------------------------------------------------
+
+var MAX_PROJECT_ITEMS_LISTED = 2000;
+
+function _classifyProjectItem(item) {
+    if (item instanceof CompItem) return "Composition";
+    if (item instanceof FolderItem) return "Folder";
+    if (item instanceof FootageItem) {
+        if (item.mainSource instanceof SolidSource) return "Solid";
+        if (item.mainSource instanceof PlaceholderSource) return "Placeholder";
+        return "Footage";
+    }
+    return "Unknown";
+}
+
+// Prefer the dedicated footageMissing flag on newer AE versions; fall back to
+// checking the source file directly where that property does not exist.
+function _isFootageMissing(item) {
+    if (!(item instanceof FootageItem)) return false;
+    if (typeof item.footageMissing !== "undefined") return !!item.footageMissing;
+    var source = item.mainSource;
+    if (source instanceof FileSource) {
+        try { return !source.file.exists; } catch (e) { return true; }
+    }
+    return false;
+}
+
+function _describeProjectItem(item) {
+    var info = {
+        id: item.id,
+        name: item.name,
+        type: _classifyProjectItem(item)
+    };
+    if (item instanceof FootageItem) {
+        info.missing = _isFootageMissing(item);
+        if (item.mainSource instanceof FileSource) {
+            try { info.file = item.mainSource.file.fsName; } catch (eFile) {}
+        }
+        try { info.width = item.width; info.height = item.height; } catch (eDim) {}
+        try { info.duration = item.duration; info.frameRate = item.frameRate; } catch (eDur) {}
+    } else if (item instanceof CompItem) {
+        info.width = item.width;
+        info.height = item.height;
+        info.duration = item.duration;
+        info.frameRate = item.frameRate;
+        info.numLayers = item.numLayers;
+    }
+    try {
+        info.folder = (item.parentFolder && item.parentFolder !== app.project.rootFolder) ? item.parentFolder.name : null;
+    } catch (eFolder) {}
+    return info;
+}
+
+function listProjectItems(args) {
+    try {
+        var params = args || {};
+        var typeFilter = params.type || "all";
+        var missingOnly = !!params.missingOnly;
+        var limit = (params.limit && params.limit > 0) ? Math.min(params.limit, MAX_PROJECT_ITEMS_LISTED) : MAX_PROJECT_ITEMS_LISTED;
+
+        var items = [];
+        var totalMatched = 0;
+        var truncated = false;
+        for (var i = 1; i <= app.project.numItems; i++) {
+            var item = app.project.item(i);
+            var type = _classifyProjectItem(item);
+            if (typeFilter !== "all" && type.toLowerCase() !== String(typeFilter).toLowerCase()) continue;
+            if (missingOnly && !_isFootageMissing(item)) continue;
+            totalMatched++;
+            if (items.length < limit) {
+                items.push(_describeProjectItem(item));
+            } else {
+                truncated = true;
+            }
+        }
+
+        return JSON.stringify({
+            status: "success",
+            totalItems: app.project.numItems,
+            matched: totalMatched,
+            returned: items.length,
+            truncated: truncated,
+            items: items
+        }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
+// Find-or-create a top-level folder by name. Only searches/creates at the
+// project root - nested target folders are not supported, matching
+// populateTemplate's own scope decision to keep footage handling simple.
+function _findOrCreateFolder(name) {
+    for (var i = 1; i <= app.project.numItems; i++) {
+        var it = app.project.item(i);
+        if (it instanceof FolderItem && it.name === name && it.parentFolder === app.project.rootFolder) {
+            return it;
+        }
+    }
+    return app.project.items.addFolder(name);
+}
+
+function importFootage(args) {
+    try {
+        var params = args || {};
+        var paths = params.paths;
+        if (!(paths instanceof Array) || paths.length === 0) {
+            return JSON.stringify({ status: "error", message: "paths must be a non-empty array of file paths." });
+        }
+
+        var folder = null;
+        if (params.folderName) {
+            folder = _findOrCreateFolder(String(params.folderName));
+        }
+
+        var results = [];
+        for (var p = 0; p < paths.length; p++) {
+            var filePath = String(paths[p]);
+            try {
+                var file = new File(filePath);
+                if (!file.exists) {
+                    results.push({ path: filePath, status: "error", message: "File not found." });
+                    continue;
+                }
+                var options = new ImportOptions(file);
+                if (params.asSequence) { options.sequence = true; }
+                var item = app.project.importFile(options);
+                if (folder) { item.parentFolder = folder; }
+                results.push({ path: filePath, status: "success", item: _describeProjectItem(item) });
+            } catch (itemError) {
+                results.push({ path: filePath, status: "error", message: itemError.toString() });
+            }
+        }
+
+        var succeeded = 0;
+        for (var r = 0; r < results.length; r++) { if (results[r].status === "success") succeeded++; }
+
+        return JSON.stringify({
+            status: succeeded > 0 ? "success" : "error",
+            message: "Imported " + succeeded + " of " + paths.length + " file(s).",
+            results: results
+        }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
+// Resolve a single FootageItem by id (preferred, unambiguous) or by name
+// (must match exactly one project item, and that item must be footage).
+function _resolveFootageItem(args) {
+    if (args && args.itemId !== undefined && args.itemId !== null) {
+        for (var i = 1; i <= app.project.numItems; i++) {
+            var it = app.project.item(i);
+            if (it.id === args.itemId) {
+                return (it instanceof FootageItem) ? { item: it } : { failReason: "Project item " + args.itemId + " ('" + it.name + "') is not footage." };
+            }
+        }
+        return { failReason: "No project item with id " + args.itemId + "." };
+    }
+    if (args && args.itemName) {
+        var matches = [];
+        for (var j = 1; j <= app.project.numItems; j++) {
+            var candidate = app.project.item(j);
+            if (candidate.name === args.itemName) matches.push(candidate);
+        }
+        if (matches.length === 0) return { failReason: "No project item named '" + args.itemName + "'." };
+        if (matches.length > 1) return { failReason: "Multiple project items named '" + args.itemName + "' - use itemId instead." };
+        return (matches[0] instanceof FootageItem) ? { item: matches[0] } : { failReason: "Project item '" + args.itemName + "' is not footage." };
+    }
+    return { failReason: "Provide itemId or itemName to select the footage item." };
+}
+
+function relinkFootage(args) {
+    try {
+        var params = args || {};
+        var resolved = _resolveFootageItem(params);
+        if (resolved.failReason) return JSON.stringify({ status: "error", message: resolved.failReason });
+
+        var newPath = params.newPath;
+        if (!newPath) return JSON.stringify({ status: "error", message: "newPath is required." });
+        var newFile = new File(String(newPath));
+        if (!newFile.exists) return JSON.stringify({ status: "error", message: "File not found: " + newPath });
+
+        var item = resolved.item;
+        var previousPath = null;
+        try { if (item.mainSource instanceof FileSource) previousPath = item.mainSource.file.fsName; } catch (eSrc) {}
+
+        item.replace(newFile);
+
+        return JSON.stringify({
+            status: "success",
+            message: "Relinked '" + item.name + "'.",
+            previousPath: previousPath,
+            item: _describeProjectItem(item)
+        }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
 function createShapeLayer(args) {
     try {
         var compName = args.compName || "";
@@ -2675,7 +2880,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.11.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.12.0-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -2688,7 +2893,8 @@ var READ_ONLY_COMMANDS = {
     "getLayerFull": true,
     "getCompFull": true,
     "getLayerClipFrames": true,
-    "getLayerAudioInfo": true
+    "getLayerAudioInfo": true,
+    "listProjectItems": true
 };
 // MUST mirror getAETempDir() on the Node server side. On Windows we use
 // LOCALAPPDATA (never redirected by OneDrive) so both processes resolve to the
@@ -3777,6 +3983,21 @@ function executeCommand(command, args) {
                 logToPanel("Calling populateTemplate function...");
                 result = populateTemplate(args);
                 logToPanel("Returned from populateTemplate.");
+                break;
+            case "listProjectItems":
+                logToPanel("Calling listProjectItems function...");
+                result = listProjectItems(args);
+                logToPanel("Returned from listProjectItems.");
+                break;
+            case "importFootage":
+                logToPanel("Calling importFootage function...");
+                result = importFootage(args);
+                logToPanel("Returned from importFootage.");
+                break;
+            case "relinkFootage":
+                logToPanel("Calling relinkFootage function...");
+                result = relinkFootage(args);
+                logToPanel("Returned from relinkFootage.");
                 break;
             case "createShapeLayer":
                 logToPanel("Calling createShapeLayer function...");

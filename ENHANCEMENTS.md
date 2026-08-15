@@ -284,7 +284,36 @@ content per instance.
   unbounded row count would risk exactly the kind of AE slowdown the keyframe-count
   caps on `animate-to-audio`/`animate-from-data` already guard against.
 
-Current bridge protocol: `1.11.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
+### 12. `import-footage` / `list-project-items` / `relink-footage`: project asset management (v1.12.0)
+
+Every prior tool that touches media (`populate-template`'s `footage` binding, layer
+creation) imports a file into the project as a side effect of some other operation;
+there was no standalone way to get new media into the project panel, inventory what's
+already there, or recover from a moved/renamed source file. These three close that gap:
+
+- `import-footage`: imports one or more files as project items, optionally into a
+  named top-level folder (created if it doesn't exist) or as a single image
+  sequence (`asSequence`). Each file's outcome is reported individually - one bad
+  path in a batch of 50 doesn't fail the other 49, same per-item reporting shape
+  `populate-template` uses for its own rows.
+- `list-project-items`: the full, filterable project panel inventory (type, id,
+  dimensions/duration, source file path, and whether that source is currently
+  missing/offline), capped at 2000 items (`MAX_PROJECT_ITEMS_LISTED`) with an
+  explicit `truncated` flag rather than a silent cutoff. Unlike `getProjectInfo`
+  (a 50-item summary meant for a first orientation glance), this is meant to be
+  queried directly, e.g. filtered to `missingOnly: true` before a render to catch
+  broken links up front.
+- `relink-footage`: points an existing footage item at a different file on disk
+  via `FootageItem.replace()` - every layer already using that item keeps working,
+  now reading the new file, without touching any layer or composition. Select the
+  item by `itemId` (from `list-project-items`, unambiguous) or `itemName` (must be
+  the only project item with that name).
+
+Missing-footage detection prefers AE's own `footageMissing` flag where the running
+version exposes it, falling back to checking the source file's existence directly
+on older versions that don't.
+
+Current bridge protocol: `1.12.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
 the `.jsx`, `EXPECTED_BRIDGE_VERSION` in `index.ts`, and the version quoted in both
 READMEs' "first test" section; `check-bridge` warns on a `BRIDGE_VERSION`/
 `EXPECTED_BRIDGE_VERSION` mismatch but the README copies aren't checked by anything -
