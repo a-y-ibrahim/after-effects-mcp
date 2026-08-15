@@ -507,6 +507,25 @@ function _findOrCreateFolder(name) {
     return app.project.items.addFolder(name);
 }
 
+// Move an already-imported item into `folder`, if requested. Kept separate
+// from the import try/catch below: the import itself already succeeded by
+// the time this runs, so a failure here (e.g. the folder became invalid)
+// must not turn a successful import into a reported "error" - that would
+// desync the caller's success/failure count from what's actually in the
+// project (same class of bug populateTemplate's footage binding was fixed
+// for: never let a side effect that already happened get hidden behind an
+// "error" status). It surfaces as a `warning` on an otherwise-successful
+// result instead.
+function _moveToFolder(item, folder) {
+    if (!folder) return null;
+    try {
+        item.parentFolder = folder;
+        return null;
+    } catch (moveError) {
+        return "Imported, but could not move into the target folder: " + moveError.toString();
+    }
+}
+
 function importFootage(args) {
     try {
         var params = args || {};
@@ -521,21 +540,50 @@ function importFootage(args) {
         }
 
         var results = [];
-        for (var p = 0; p < paths.length; p++) {
-            var filePath = String(paths[p]);
+        if (params.asSequence) {
+            // AE's sequence import takes ONE representative frame and scans that
+            // file's own folder for the rest of the numbered sequence itself - it
+            // does not take a list of files. Looping importFile once per path here
+            // (as the non-sequence branch below does) would issue one separate,
+            // overlapping "import this whole folder as a sequence" call per path
+            // instead of the single sequence item the tool description promises.
+            if (paths.length !== 1) {
+                return JSON.stringify({ status: "error", message: "asSequence expects exactly one path: the first frame of the sequence. After Effects finds the rest of the sequence in that same folder itself." });
+            }
+            var seqPath = String(paths[0]);
             try {
-                var file = new File(filePath);
-                if (!file.exists) {
-                    results.push({ path: filePath, status: "error", message: "File not found." });
-                    continue;
+                var seqFile = new File(seqPath);
+                if (!seqFile.exists) {
+                    results.push({ path: seqPath, status: "error", message: "File not found." });
+                } else {
+                    var seqOptions = new ImportOptions(seqFile);
+                    seqOptions.sequence = true;
+                    var seqItem = app.project.importFile(seqOptions);
+                    var seqWarning = _moveToFolder(seqItem, folder);
+                    var seqResult = { path: seqPath, status: "success", item: _describeProjectItem(seqItem) };
+                    if (seqWarning) seqResult.warning = seqWarning;
+                    results.push(seqResult);
                 }
-                var options = new ImportOptions(file);
-                if (params.asSequence) { options.sequence = true; }
-                var item = app.project.importFile(options);
-                if (folder) { item.parentFolder = folder; }
-                results.push({ path: filePath, status: "success", item: _describeProjectItem(item) });
-            } catch (itemError) {
-                results.push({ path: filePath, status: "error", message: itemError.toString() });
+            } catch (seqError) {
+                results.push({ path: seqPath, status: "error", message: seqError.toString() });
+            }
+        } else {
+            for (var p = 0; p < paths.length; p++) {
+                var filePath = String(paths[p]);
+                try {
+                    var file = new File(filePath);
+                    if (!file.exists) {
+                        results.push({ path: filePath, status: "error", message: "File not found." });
+                        continue;
+                    }
+                    var item = app.project.importFile(new ImportOptions(file));
+                    var warning = _moveToFolder(item, folder);
+                    var result = { path: filePath, status: "success", item: _describeProjectItem(item) };
+                    if (warning) result.warning = warning;
+                    results.push(result);
+                } catch (itemError) {
+                    results.push({ path: filePath, status: "error", message: itemError.toString() });
+                }
             }
         }
 

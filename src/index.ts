@@ -2929,7 +2929,7 @@ server.tool(
       .min(1)
       .max(MAX_IMPORT_FILES)
       .describe(
-        `Absolute file paths to import (max ${MAX_IMPORT_FILES}). Each becomes one project item, unless asSequence is set.`,
+        `Absolute file paths to import (max ${MAX_IMPORT_FILES}). Each becomes one project item. If asSequence is set, provide exactly one path instead (see asSequence).`,
       ),
     folderName: z
       .string()
@@ -2941,10 +2941,21 @@ server.tool(
       .boolean()
       .optional()
       .describe(
-        "Import all of paths as a single image sequence item instead of one item per file (paths should be the consecutive frames of one sequence).",
+        "Import as a single image sequence item instead of one item per file. paths must contain exactly one path: the first frame. After Effects scans that file's own folder for the rest of the numbered sequence itself.",
       ),
   },
   async (parameters) => {
+    if (parameters.asSequence && parameters.paths.length !== 1) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "asSequence expects exactly one path: the first frame of the sequence. After Effects finds the rest of the sequence in that same folder itself.",
+          },
+        ],
+        isError: true,
+      };
+    }
     try {
       const result = await sendBridgeCommand("importFootage", parameters, 30000, 250);
       return bridgeToolResult(result);
