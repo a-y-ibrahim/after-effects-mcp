@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0](https://github.com/a-y-ibrahim/after-effects-mcp/compare/v1.11.1...v1.12.0) (2026-08-15)
+
+
+### Features
+
+* add project asset management tools (import-footage, list-project-items, relink-footage) ([4baa734](https://github.com/a-y-ibrahim/after-effects-mcp/commit/4baa734892f04c8c5def6cae469ea7a161a0a860))
+
+
+### Bug Fixes
+
+* correct import-footage's asSequence handling and avoid mislabeling a successful import as failed ([618d843](https://github.com/a-y-ibrahim/after-effects-mcp/commit/618d84363a5b890b110c018912b0463f5de68d4f))
+
 ## [1.11.1](https://github.com/a-y-ibrahim/after-effects-mcp/compare/v1.11.0...v1.11.1) (2026-08-13)
 
 
