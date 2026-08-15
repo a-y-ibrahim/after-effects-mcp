@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0](https://github.com/a-y-ibrahim/after-effects-mcp/compare/v1.12.0...v1.13.0) (2026-08-15)
+
+
+### Features
+
+* add layer structure tools (set-layer-parent, reorder-layer, precompose-layers) ([87f5a81](https://github.com/a-y-ibrahim/after-effects-mcp/commit/87f5a81cfe41c289a168ef68179c5a51b9b854d8))
+
+
+### Bug Fixes
+
+* reject duplicate indices in precompose-layers up front ([acfedb5](https://github.com/a-y-ibrahim/after-effects-mcp/commit/acfedb52d1834fda0303913a9d65879ded6c2156))
+
 ## [1.12.0](https://github.com/a-y-ibrahim/after-effects-mcp/compare/v1.11.1...v1.12.0) (2026-08-15)
 
 
