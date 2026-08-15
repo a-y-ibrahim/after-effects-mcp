@@ -2928,7 +2928,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.12.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.13.0-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3244,6 +3244,104 @@ function deleteLayer(args) {
         var deletedName = layer.name, deletedIndex = layer.index;
         layer.remove();
         return JSON.stringify({ status: "success", message: "Layer deleted successfully", deleted: { name: deletedName, index: deletedIndex } }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Layer structure: parenting, stacking order, precompose. All three edit the
+// layer graph itself rather than any one layer's properties - previously
+// only reachable, if at all, through execute-script.
+// ---------------------------------------------------------------------------
+
+function setLayerParent(args) {
+    try {
+        var comp = _resolveComp(args);
+        if (!comp) return JSON.stringify({ status: "error", message: "No composition found." });
+        var layer = _resolveLayer(comp, args);
+        if (!layer) return JSON.stringify({ status: "error", message: "Layer not found. Provide layerIndex or layerName." });
+
+        if (args.clearParent) {
+            layer.parent = null;
+            return JSON.stringify({ status: "success", message: "Cleared parent for '" + layer.name + "'.", layer: { name: layer.name, index: layer.index }, parent: null }, null, 2);
+        }
+
+        var parentLayer = _resolveLayer(comp, { layerIndex: args.parentLayerIndex, layerName: args.parentLayerName });
+        if (!parentLayer) return JSON.stringify({ status: "error", message: "Parent layer not found. Provide parentLayerIndex or parentLayerName, or set clearParent to remove the existing parent instead." });
+        if (parentLayer.index === layer.index) return JSON.stringify({ status: "error", message: "A layer can not be its own parent." });
+
+        layer.parent = parentLayer;
+        return JSON.stringify({ status: "success", message: "Parented '" + layer.name + "' to '" + parentLayer.name + "'.", layer: { name: layer.name, index: layer.index }, parent: { name: parentLayer.name, index: parentLayer.index } }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
+function reorderLayer(args) {
+    try {
+        var comp = _resolveComp(args);
+        if (!comp) return JSON.stringify({ status: "error", message: "No composition found." });
+        var layer = _resolveLayer(comp, args);
+        if (!layer) return JSON.stringify({ status: "error", message: "Layer not found. Provide layerIndex or layerName." });
+
+        var hasPosition = args.toPosition === "top" || args.toPosition === "bottom";
+        var hasBefore = args.beforeLayerIndex !== undefined || args.beforeLayerName !== undefined;
+        var hasAfter = args.afterLayerIndex !== undefined || args.afterLayerName !== undefined;
+        var modeCount = (hasPosition ? 1 : 0) + (hasBefore ? 1 : 0) + (hasAfter ? 1 : 0);
+        if (modeCount !== 1) {
+            return JSON.stringify({ status: "error", message: "Provide exactly one of: toPosition ('top'/'bottom'), beforeLayerIndex/beforeLayerName, or afterLayerIndex/afterLayerName." });
+        }
+
+        if (hasPosition) {
+            if (args.toPosition === "top") { layer.moveToBeginning(); } else { layer.moveToEnd(); }
+        } else if (hasBefore) {
+            var beforeLayer = _resolveLayer(comp, { layerIndex: args.beforeLayerIndex, layerName: args.beforeLayerName });
+            if (!beforeLayer) return JSON.stringify({ status: "error", message: "Reference layer (beforeLayerIndex/beforeLayerName) not found." });
+            layer.moveBefore(beforeLayer);
+        } else {
+            var afterLayer = _resolveLayer(comp, { layerIndex: args.afterLayerIndex, layerName: args.afterLayerName });
+            if (!afterLayer) return JSON.stringify({ status: "error", message: "Reference layer (afterLayerIndex/afterLayerName) not found." });
+            layer.moveAfter(afterLayer);
+        }
+
+        return JSON.stringify({ status: "success", message: "Reordered '" + layer.name + "'.", layer: { name: layer.name, index: layer.index } }, null, 2);
+    } catch (error) {
+        return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
+    }
+}
+
+function precomposeLayers(args) {
+    try {
+        var comp = _resolveComp(args);
+        if (!comp) return JSON.stringify({ status: "error", message: "No composition found." });
+
+        var indices = args.layerIndices;
+        if (!(indices instanceof Array) || indices.length === 0) {
+            return JSON.stringify({ status: "error", message: "layerIndices must be a non-empty array of 1-based layer indices." });
+        }
+        for (var i = 0; i < indices.length; i++) {
+            if (typeof indices[i] !== "number" || indices[i] < 1 || indices[i] > comp.numLayers) {
+                return JSON.stringify({ status: "error", message: "Invalid layer index: " + indices[i] + ". Must be between 1 and " + comp.numLayers + "." });
+            }
+        }
+
+        var name = args.name;
+        if (!name) return JSON.stringify({ status: "error", message: "name is required for the new precomposition." });
+
+        var moveAllAttributes = !!args.moveAllAttributes;
+        if (moveAllAttributes && indices.length > 1) {
+            return JSON.stringify({ status: "error", message: "moveAllAttributes only works when precomposing a single layer (layerIndices has " + indices.length + " entries)." });
+        }
+
+        var newComp = comp.layers.precompose(indices, name, moveAllAttributes);
+
+        return JSON.stringify({
+            status: "success",
+            message: "Precomposed " + indices.length + " layer(s) into '" + newComp.name + "'.",
+            precomposition: { name: newComp.name, id: newComp.id, index: newComp.index },
+            sourceComp: { name: comp.name, index: comp.index }
+        }, null, 2);
     } catch (error) {
         return JSON.stringify({ status: "error", message: error.toString() }, null, 2);
     }
@@ -4212,6 +4310,21 @@ function executeCommand(command, args) {
                 logToPanel("Calling setLayerMask function...");
                 result = setLayerMask(args);
                 logToPanel("Returned from setLayerMask.");
+                break;
+            case "setLayerParent":
+                logToPanel("Calling setLayerParent function...");
+                result = setLayerParent(args);
+                logToPanel("Returned from setLayerParent.");
+                break;
+            case "reorderLayer":
+                logToPanel("Calling reorderLayer function...");
+                result = reorderLayer(args);
+                logToPanel("Returned from reorderLayer.");
+                break;
+            case "precomposeLayers":
+                logToPanel("Calling precomposeLayers function...");
+                result = precomposeLayers(args);
+                logToPanel("Returned from precomposeLayers.");
                 break;
             case "batchSetLayerProperties":
                 logToPanel("Calling batchSetLayerProperties function...");

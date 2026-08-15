@@ -313,7 +313,28 @@ Missing-footage detection prefers AE's own `footageMissing` flag where the runni
 version exposes it, falling back to checking the source file's existence directly
 on older versions that don't.
 
-Current bridge protocol: `1.12.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
+### 13. `set-layer-parent` / `reorder-layer` / `precompose-layers`: layer structure (v1.13.0)
+
+Every existing tool edits a layer's own properties (transform, effects, mask,
+audio...); none of them edit the layer _graph_ itself - who's parented to whom,
+what stacking order they're in, which layers are bundled into a nested comp. These
+three, previously reachable (if at all) only through `execute-script`, close that:
+
+- `set-layer-parent`: sets or clears a layer's parent (`AVLayer.parent` /
+  `Layer.parent`). Rejects a layer being parented to itself up front rather than
+  relying on the opaque error After Effects itself throws for that case; a deeper
+  parenting cycle (A → B → A) still surfaces AE's own error as-is, rather than
+  reimplementing that validation client-side.
+- `reorder-layer`: `moveToBeginning`/`moveToEnd`/`moveBefore`/`moveAfter`, selected
+  via exactly one of `toPosition`, `beforeLayer*`, or `afterLayer*` - validated as
+  mutually exclusive before touching the layer.
+- `precompose-layers`: wraps `LayerCollection.precompose()`. `moveAllAttributes`
+  (move effects/masks/blend mode into the new precomp rather than leaving them on
+  the wrapping layer) is only valid for a single source layer - After Effects
+  itself enforces this, but it's checked up front here too so the failure reason is
+  specific instead of a raw AE exception string.
+
+Current bridge protocol: `1.13.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
 the `.jsx`, `EXPECTED_BRIDGE_VERSION` in `index.ts`, and the version quoted in both
 READMEs' "first test" section; `check-bridge` warns on a `BRIDGE_VERSION`/
 `EXPECTED_BRIDGE_VERSION` mismatch but the README copies aren't checked by anything -

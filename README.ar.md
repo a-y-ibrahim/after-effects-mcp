@@ -32,7 +32,7 @@ _بُنيت ورُندرت بالكامل من طلب واحد، بدون أي �
 | **الموثوقية**          | معرف لكل أمر (لا نتائج قديمة)، مجموعة تراجع واحدة لكل أمر، استطلاع أسرع، مجلد مشترك محصن ضد OneDrive، فحص صحة `check-bridge` |
 | **إدارة الطبقات**      | كاميرات، تكرار، حذف، ماسكات، تعديل دفعي، إعدادات الكومب - كأدوات مخصصة                                                       |
 
-**المجموع 48 أداة.** التفاصيل في [ENHANCEMENTS.md](ENHANCEMENTS.md).
+**المجموع 57 أداة.** التفاصيل في [ENHANCEMENTS.md](ENHANCEMENTS.md).
 
 ---
 
@@ -67,7 +67,7 @@ claude mcp add AfterEffectsMCP node /المسار/المطلق/إلى/after-effe
 ```
 
 **أول اختبار:** اطلب من العميل _«check the After Effects bridge»_. يجب أن يرد بـ
-`bridgeVersion: 1.12.0-mcp-enhanced` و`versionMatch: true`.
+`bridgeVersion: 1.13.0-mcp-enhanced` و`versionMatch: true`.
 
 > 💡 إن عدلت الخادم، أعد `npm run build` ثم أعد تشغيل عميل MCP.
 > إن عدلت الجسر، أعد أيضا `npm run install-bridge` وأعد تشغيل After Effects.
@@ -77,11 +77,12 @@ claude mcp add AfterEffectsMCP node /المسار/المطلق/إلى/after-effe
 ## 🧰 الأدوات بإيجاز
 
 **الفحص والتشخيص** - `see-frame`، `contact-sheet`، `match-reference`، `inspect-comp`، `inspect-layer`، `get-results`، `check-bridge`، `run-bridge-test`، `get-help`
-**الكومبوزيشن والطبقات** - `create-composition`، `set-composition-properties`، `create-text-layer`، `localize-comp`، `create-camera`، `create-adjustment-layer`، `duplicate-layer`، `delete-layer`، `center-layers`، `set-layer-mask`، `batch-set-layer-properties`
-**التحريك** - `setLayerKeyframe`، `setLayerExpression`، `get-layer-clip-frames`
+**الكومبوزيشن والطبقات** - `create-composition`، `set-composition-properties`، `create-text-layer`، `localize-comp`، `create-camera`، `create-adjustment-layer`، `duplicate-layer`، `delete-layer`، `center-layers`، `set-layer-mask`، `batch-set-layer-properties`، `set-layer-parent`، `reorder-layer`، `precompose-layers`، `populate-template`
+**التحريك** - `setLayerKeyframe`، `setLayerExpression`، `get-layer-clip-frames`، `animate-to-audio`، `animate-from-data`
 **التأثيرات** - `apply-effect`، `add-any-effect`، `apply-effect-template`، `list-layer-effects`، `list-available-effects`، `set-effect-property`، `set-effect-keyframe`، `remove-effect`، `mcp_aftereffects_get_effects_help`
 **البريست** - `list-presets`، `search-presets`، `apply-preset`
 **الصوت والعلامات** - `get-audio-info`، `set-audio-levels`، `analyze-audio-waveform`، `add-marker`، `add-markers-bulk`
+**عناصر المشروع** - `import-footage`، `list-project-items`، `relink-footage`
 **التصدير** - `add-to-render-queue`، `render-queue`، `start-render`، `render-aerender`، `render-status`
 **القوة** - `execute-script` (سكربت حر)، `run-script`، `test-animation`
 

@@ -1,6 +1,6 @@
 # Tool Reference
 
-The server exposes **48 tools**. Each tool's full input schema (parameter names,
+The server exposes **57 tools**. Each tool's full input schema (parameter names,
 types, and which are required) is self-described through MCP, so your client shows
 it inline. This page is the grouped catalog with each tool's purpose.
 
@@ -35,14 +35,28 @@ When something times out or behaves oddly, run **`check-bridge`** first.
 | `center-layers`              | Center one layer, the selected layers, or all layers in a composition.                                                                                                                                                                                                                                            |
 | `set-layer-mask`             | Create or modify a mask on a layer from `maskRect` (rectangle) or `maskPath` (vertices).                                                                                                                                                                                                                          |
 | `batch-set-layer-properties` | Set transform/visibility properties on many layers in one call (3D, position, scale, rotation, opacity, blend mode, start/out).                                                                                                                                                                                   |
+| `set-layer-parent`           | Set or clear a layer's parent (standard AE parent/child rig).                                                                                                                                                                                                                                                     |
+| `reorder-layer`              | Change a layer's stacking order: to top/bottom, or before/after another layer.                                                                                                                                                                                                                                    |
+| `precompose-layers`          | Bundle one or more layers into a new nested composition (Layer > Precompose).                                                                                                                                                                                                                                     |
+| `populate-template`          | Duplicate a template composition once per row of a data table, populating text/footage/property bindings per row - bulk-generate personalized comps.                                                                                                                                                              |
 
 ## Animation
 
-| Tool                    | Purpose                                                                          |
-| ----------------------- | -------------------------------------------------------------------------------- |
-| `setLayerKeyframe`      | Set a keyframe for a layer property at a given time.                             |
-| `setLayerExpression`    | Set or remove an expression on a layer property.                                 |
-| `get-layer-clip-frames` | Get a layer's clip start/end frames, source frame range, and duration in frames. |
+| Tool                    | Purpose                                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `setLayerKeyframe`      | Set a keyframe for a layer property at a given time.                                                            |
+| `setLayerExpression`    | Set or remove an expression on a layer property.                                                                |
+| `get-layer-clip-frames` | Get a layer's clip start/end frames, source frame range, and duration in frames.                                |
+| `animate-to-audio`      | Generate keyframes for a layer property straight from an audio file's amplitude (waveform or peak-detect mode). |
+| `animate-from-data`     | Generate keyframes for a layer property from any numeric series, not just audio.                                |
+
+## Project assets
+
+| Tool                 | Purpose                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `import-footage`     | Import one or more files into the project as footage items, optionally into a folder or as an image sequence. |
+| `list-project-items` | Full, filterable inventory of the project panel, flagging missing/offline footage.                            |
+| `relink-footage`     | Point a footage item's source at a different file on disk, without touching how it's used in any composition. |
 
 ## Effects
 

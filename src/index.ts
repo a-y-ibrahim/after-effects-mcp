@@ -2558,7 +2558,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.12.0-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.13.0-mcp-enhanced";
 
 server.tool(
   "check-bridge",
@@ -3126,6 +3126,150 @@ server.tool(
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error deleting layer: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+const MAX_PRECOMPOSE_LAYERS = 500;
+
+server.tool(
+  "set-layer-parent",
+  "Set (or clear) a layer's parent within its composition - the standard After Effects parent/child rig, where the child inherits the parent's position/rotation/scale. Select the target layer and, to set a parent, the parent layer; to remove an existing parent instead, set clearParent to true (parentLayerIndex/parentLayerName are then ignored).",
+  {
+    compName: z.string().optional().describe("Composition name (or active comp if omitted)."),
+    compIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based comp index, if compName is omitted."),
+    layerIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based index of the layer to parent."),
+    layerName: z
+      .string()
+      .optional()
+      .describe("Name of the layer to parent (alternative to layerIndex)."),
+    parentLayerIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based index of the layer to parent to."),
+    parentLayerName: z
+      .string()
+      .optional()
+      .describe("Name of the layer to parent to (alternative to parentLayerIndex)."),
+    clearParent: z
+      .boolean()
+      .optional()
+      .describe("Remove the layer's existing parent instead of setting a new one."),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("setLayerParent", parameters, 8000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error setting layer parent: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "reorder-layer",
+  "Change a layer's stacking order (z-order) within its composition. Provide exactly one of toPosition, before*, or after* to say where it should move.",
+  {
+    compName: z.string().optional().describe("Composition name (or active comp if omitted)."),
+    compIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based comp index, if compName is omitted."),
+    layerIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based index of the layer to move."),
+    layerName: z
+      .string()
+      .optional()
+      .describe("Name of the layer to move (alternative to layerIndex)."),
+    toPosition: z
+      .enum(["top", "bottom"])
+      .optional()
+      .describe("Move to the very top (front) or bottom (back) of the stacking order."),
+    beforeLayerIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Move directly above (in front of) this layer."),
+    beforeLayerName: z.string().optional().describe("Same as beforeLayerIndex, by name."),
+    afterLayerIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Move directly below (behind) this layer."),
+    afterLayerName: z.string().optional().describe("Same as afterLayerIndex, by name."),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("reorderLayer", parameters, 8000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error reordering layer: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "precompose-layers",
+  "Bundle one or more layers into a new nested composition (Layer > Precompose), replacing them in the source comp with a single layer referencing the new precomp.",
+  {
+    compName: z
+      .string()
+      .optional()
+      .describe("Source composition name (or active comp if omitted)."),
+    compIndex: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based comp index, if compName is omitted."),
+    layerIndices: z
+      .array(z.number().int().positive())
+      .min(1)
+      .max(MAX_PRECOMPOSE_LAYERS)
+      .describe("1-based indices of the layers to precompose, within the source composition."),
+    name: z.string().describe("Name for the new precomposition."),
+    moveAllAttributes: z
+      .boolean()
+      .optional()
+      .describe(
+        "Move the layer's effects/masks/blend mode into the new precomp instead of leaving them on the wrapping layer. Only valid when layerIndices has exactly one entry.",
+      ),
+  },
+  async (parameters) => {
+    try {
+      const result = await sendBridgeCommand("precomposeLayers", parameters, 15000, 250);
+      return bridgeToolResult(result);
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error precomposing layers: ${String(error)}` }],
         isError: true,
       };
     }
