@@ -3320,10 +3320,15 @@ function precomposeLayers(args) {
         if (!(indices instanceof Array) || indices.length === 0) {
             return JSON.stringify({ status: "error", message: "layerIndices must be a non-empty array of 1-based layer indices." });
         }
+        var seenIndices = {};
         for (var i = 0; i < indices.length; i++) {
             if (typeof indices[i] !== "number" || indices[i] < 1 || indices[i] > comp.numLayers) {
                 return JSON.stringify({ status: "error", message: "Invalid layer index: " + indices[i] + ". Must be between 1 and " + comp.numLayers + "." });
             }
+            if (seenIndices[indices[i]]) {
+                return JSON.stringify({ status: "error", message: "Duplicate layer index: " + indices[i] + ". Each layer can only appear once in layerIndices." });
+            }
+            seenIndices[indices[i]] = true;
         }
 
         var name = args.name;
