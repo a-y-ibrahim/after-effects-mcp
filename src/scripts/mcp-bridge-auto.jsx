@@ -2928,7 +2928,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.13.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.13.1-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3631,7 +3631,10 @@ function seeFrame(args) {
             var scalePct = (tw / comp.width) * 100;
             try { nested.property("ADBE Transform Group").property("ADBE Scale").setValue([scalePct, scalePct]); } catch (e) {}
             try { nested.property("ADBE Transform Group").property("ADBE Position").setValue([tw / 2, th / 2]); } catch (e) {}
-            try { nested.collapseTransformation = true; } catch (e) {}
+            // Do not collapse transformations on the nested comp: the source comp's
+            // effects would then run on the downscaled image with their pixel values
+            // unchanged (a 40 px blur on a quarter-size frame reads as 160 px), and
+            // expressions that use thisComp.width would see the preview size.
             target = tempComp;
         }
         try { target.motionBlur = motionBlur; } catch (e) {}
