@@ -334,7 +334,7 @@ three, previously reachable (if at all) only through `execute-script`, close tha
   itself enforces this, but it's checked up front here too so the failure reason is
   specific instead of a raw AE exception string.
 
-Current bridge protocol: `1.13.0-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
+Current bridge protocol: `1.13.1-mcp-enhanced` (kept in sync between `BRIDGE_VERSION` in
 the `.jsx`, `EXPECTED_BRIDGE_VERSION` in `index.ts`, and the version quoted in both
 READMEs' "first test" section; `check-bridge` warns on a `BRIDGE_VERSION`/
 `EXPECTED_BRIDGE_VERSION` mismatch but the README copies aren't checked by anything -
