@@ -14,6 +14,10 @@ import {
   tail,
   nextPollDelay,
   POLL_START_MS,
+  assessRender,
+  countRenderedFrames,
+  isSequenceOutput,
+  RenderEvidence,
 } from "../src/lib/bridge-core";
 
 describe("bridgeToolResult", () => {
@@ -298,6 +302,119 @@ describe("tail", () => {
 
   it("returns the whole string at the exact boundary", () => {
     expect(tail("abc", 3)).toBe("abc");
+  });
+});
+
+describe("countRenderedFrames", () => {
+  it("reads the frame count from the parentheses", () => {
+    const log = [
+      "PROGRESS:  00064 (65): 0 Seconds",
+      "PROGRESS:  00065 (66): 1 Seconds",
+      "aerender version 26.5x89",
+    ].join("\n");
+    expect(countRenderedFrames(log)).toBe(66);
+  });
+
+  it("works when the first column is a timecode", () => {
+    expect(countRenderedFrames("PROGRESS:  0:00:02:15 (66): 1 Seconds\n")).toBe(66);
+  });
+
+  it("ignores other PROGRESS lines and returns 0 for an empty log", () => {
+    expect(countRenderedFrames("PROGRESS:  Total Time Elapsed: 15 Seconds\n")).toBe(0);
+    expect(countRenderedFrames("")).toBe(0);
+  });
+});
+
+describe("isSequenceOutput", () => {
+  it("detects an image sequence pattern", () => {
+    expect(isSequenceOutput("/renders/frame_[#####].png")).toBe(true);
+    expect(isSequenceOutput("/renders/out.mp4")).toBe(false);
+    expect(isSequenceOutput("/renders/take[2].mp4")).toBe(false);
+  });
+});
+
+describe("assessRender", () => {
+  const START = 1_000_000;
+  const base: RenderEvidence = {
+    alive: false,
+    exitCode: 0,
+    signal: null,
+    logText: "PROGRESS:  00599 (600): 0 Seconds\n",
+    outputPath: "/renders/out.mp4",
+    outputSize: 5000,
+    outputMtimeMs: START + 60_000,
+    startedAtMs: START,
+  };
+
+  it("reports running while the launcher is alive", () => {
+    expect(assessRender({ ...base, alive: true, exitCode: undefined }).state).toBe("running");
+  });
+
+  it("reports finished after a clean exit with a fresh output file", () => {
+    expect(assessRender(base)).toEqual({ state: "finished", framesRendered: 600 });
+  });
+
+  it("fails when the launcher was ended by a signal", () => {
+    const r = assessRender({
+      ...base,
+      exitCode: null,
+      signal: "SIGTERM",
+      logText: "PROGRESS:  00065 (66): 1 Seconds\n",
+      outputSize: null,
+      outputMtimeMs: null,
+    });
+    expect(r.state).toBe("failed");
+    expect(r.framesRendered).toBe(66);
+    expect(r.reason).toContain("SIGTERM");
+    expect(r.reason).toContain("66 rendered frames");
+  });
+
+  it("fails on a non-zero exit code even when an output file exists", () => {
+    const r = assessRender({ ...base, exitCode: 1 });
+    expect(r.state).toBe("failed");
+    expect(r.reason).toContain("code 1");
+  });
+
+  it("fails when the launcher is gone and there is no output file", () => {
+    const r = assessRender({
+      ...base,
+      exitCode: undefined,
+      outputSize: null,
+      outputMtimeMs: null,
+    });
+    expect(r.state).toBe("failed");
+    expect(r.reason).toContain("no longer running");
+    expect(r.reason).toContain("does not exist");
+  });
+
+  it("fails on an empty output file", () => {
+    expect(assessRender({ ...base, outputSize: 0 }).reason).toContain("is empty");
+  });
+
+  it("fails when the output file is left over from an earlier render", () => {
+    const r = assessRender({ ...base, outputMtimeMs: START - 60_000 });
+    expect(r.state).toBe("failed");
+    expect(r.reason).toContain("older than this render");
+  });
+
+  it("does not look for a single file when the output is an image sequence", () => {
+    const r = assessRender({
+      ...base,
+      outputPath: "/renders/frame_[#####].png",
+      outputSize: null,
+      outputMtimeMs: null,
+    });
+    expect(r.state).toBe("finished");
+  });
+
+  it("uses the singular for one frame", () => {
+    const r = assessRender({
+      ...base,
+      signal: "SIGKILL",
+      exitCode: null,
+      logText: "PROGRESS:  00000 (1): 0 Seconds\n",
+    });
+    expect(r.reason).toContain("1 rendered frame.");
   });
 });
 

@@ -20,6 +20,8 @@ import {
   tail,
   nextPollDelay,
   POLL_START_MS,
+  assessRender,
+  RenderAssessment,
 } from "./lib/bridge-core.js";
 import { collectPresetFiles } from "./lib/preset-scan.js";
 import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
@@ -3977,8 +3979,41 @@ interface RenderJob {
   output: string;
   logPath: string;
   startedAt: string;
+  // Set once the launcher's exit has been observed. A job whose launcher is gone
+  // is not necessarily done: see assessRender.
+  exited: boolean;
+  exitCode?: number | null;
+  signal?: string | null;
 }
 const runningRenders = new Map<number, RenderJob>();
+
+function assessRenderJob(job: RenderJob): RenderAssessment {
+  let logText = "";
+  try {
+    logText = fs.readFileSync(job.logPath, "utf8");
+  } catch {
+    /* no log yet */
+  }
+  let outputSize: number | null = null;
+  let outputMtimeMs: number | null = null;
+  try {
+    const st = fs.statSync(job.output);
+    outputSize = st.size;
+    outputMtimeMs = st.mtimeMs;
+  } catch {
+    /* no output file */
+  }
+  return assessRender({
+    alive: !job.exited && pidAlive(job.pid),
+    exitCode: job.exitCode,
+    signal: job.signal,
+    logText,
+    outputPath: job.output,
+    outputSize,
+    outputMtimeMs,
+    startedAtMs: Date.parse(job.startedAt),
+  });
+}
 
 async function getOpenProjectPath(): Promise<string | null> {
   const raw = await sendBridgeCommand("getProjectInfo", {}, 6000, 250);
@@ -4120,32 +4155,44 @@ server.tool(
       const logPath = path.join(getAETempDir(), `aerender-${nextCommandId()}.log`);
       const out = fs.openSync(logPath, "a");
       const child = spawn(aerenderPath, args, { detached: true, stdio: ["ignore", out, out] });
-      child.unref();
       const pid = child.pid || -1;
-      if (pid > 0)
-        runningRenders.set(pid, {
-          pid,
-          comp: p.compName,
-          output: p.outputPath,
-          logPath,
-          startedAt: new Date().toISOString(),
-        });
+      const job: RenderJob = {
+        pid,
+        comp: p.compName,
+        output: p.outputPath,
+        logPath,
+        startedAt: new Date().toISOString(),
+        exited: false,
+      };
+      child.on("exit", (code, signal) => {
+        job.exited = true;
+        job.exitCode = code;
+        job.signal = signal;
+      });
+      child.on("error", () => {
+        job.exited = true;
+      });
+      child.unref();
+      if (pid > 0) runningRenders.set(pid, job);
 
       if (p.waitMs && p.waitMs > 0) {
         const start = Date.now();
         while (Date.now() - start < p.waitMs) {
-          if (!pidAlive(pid)) break;
+          if (job.exited || !pidAlive(pid)) break;
           await new Promise((r) => setTimeout(r, 1000));
         }
-        const alive = pidAlive(pid);
-        if (!alive) runningRenders.delete(pid);
+        const verdict = assessRenderJob(job);
+        if (verdict.state !== "running") runningRenders.delete(pid);
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify(
                 {
-                  status: alive ? "running" : "finished",
+                  status: verdict.state,
+                  ...(verdict.reason ? { error: verdict.reason } : {}),
+                  framesRendered: verdict.framesRendered,
+                  ...(job.exited ? { exitCode: job.exitCode, signal: job.signal } : {}),
                   pid,
                   comp: p.compName,
                   output: p.outputPath,
@@ -4159,6 +4206,7 @@ server.tool(
               ),
             },
           ],
+          ...(verdict.state === "failed" ? { isError: true } : {}),
         };
       }
 
@@ -4194,7 +4242,7 @@ server.tool(
 
 server.tool(
   "render-status",
-  "Check background aerender renders started with render-aerender: which are still running, which finished, and the tail of each render log.",
+  "Check background aerender renders started with render-aerender: which are still running, which finished, which failed and why, and the tail of each render log.",
   {
     pid: z
       .number()
@@ -4228,14 +4276,17 @@ server.tool(
         };
       }
       const renders = jobs.map((j) => {
-        const alive = pidAlive(j.pid);
-        if (!alive) runningRenders.delete(j.pid);
+        const verdict = assessRenderJob(j);
+        if (verdict.state !== "running") runningRenders.delete(j.pid);
         return {
           pid: j.pid,
           comp: j.comp,
           output: j.output,
           startedAt: j.startedAt,
-          state: alive ? "running" : "finished",
+          state: verdict.state,
+          ...(verdict.reason ? { error: verdict.reason } : {}),
+          framesRendered: verdict.framesRendered,
+          ...(j.exited ? { exitCode: j.exitCode, signal: j.signal } : {}),
           logTail: tailFile(j.logPath),
         };
       });
