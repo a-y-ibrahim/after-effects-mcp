@@ -2928,7 +2928,7 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.13.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.13.1-mcp-enhanced";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
@@ -3572,10 +3572,12 @@ function _sweepMcpTempComps() {
     } catch (e) {}
 }
 
-// Import a file, retrying briefly. saveFrameToPng writes a PNG synchronously, but
-// on Windows the OS write-lock/flush can lag, so an immediate importFile fails
-// with "File exists but couldn't be open for reading". A short retry loop lets the
-// lock release. Only used for PNGs we just wrote (contact-sheet / match-reference).
+// Import a file, retrying briefly in case the OS still holds a lock on it. Only
+// used for files that already exist on disk (the match-reference image). Never
+// import a PNG written by saveFrameToPng in the same script: After Effects writes
+// it after the script returns, so the import reads a missing or partial file
+// ("Error reading XMP metadata from file"). Nest the comp instead, see
+// _addCompAtTime.
 function _importWithRetry(file) {
     var lastErr = null;
     for (var attempt = 0; attempt < 10; attempt++) {
@@ -3587,6 +3589,21 @@ function _importWithRetry(file) {
         }
     }
     throw lastErr;
+}
+
+// Add `comp` to `target` as a layer that shows the comp's frame at time `t` when
+// `target` is rendered at time 0. Lets contact-sheet / match-reference composite
+// frames of a comp without a PNG round trip.
+function _addCompAtTime(target, comp, t) {
+    // The comp's last frame starts one frame before its end; past that the layer
+    // would already be over at time 0 and the cell would render empty.
+    var last = comp.duration - comp.frameDuration;
+    if (t > last) t = last;
+    if (t < 0) t = 0;
+    var lyr = target.layers.add(comp);
+    lyr.startTime = -t;
+    try { lyr.audioEnabled = false; } catch (e) {}
+    return lyr;
 }
 
 // see-frame: render one or more frames of a comp to PNG and return their paths so
@@ -3664,14 +3681,12 @@ function seeFrame(args) {
     }
 }
 
-// contact-sheet: render N frames sampled across the comp and let AE itself
-// composite them into ONE labeled thumbnail grid. Every temp comp / imported
-// footage / scratch PNG is tracked and removed, so the user's project is never
-// polluted.
+// contact-sheet: sample N frames across the comp and let AE itself composite
+// them into ONE labeled thumbnail grid. The comp is nested once per cell, offset
+// in time, so only the final grid is written to disk. The temp comp is removed,
+// so the user's project is never polluted.
 function contactSheet(args) {
     var gridComp = null;
-    var importedItems = [];
-    var scratch = [];
     try {
         _sweepMcpTempComps();
         var comp = _resolveComp(args);
@@ -3697,16 +3712,8 @@ function contactSheet(args) {
         gridComp = app.project.items.addComp("__mcp_tmp__contact", gw, gh, 1, 1, comp.frameRate);
 
         for (var i = 0; i < count; i++) {
-            _seeFrameSeq++;
             var t = (dur * (i + 0.5)) / count;
-            var pngPath = folder + "/__mcp_cs_" + _seeFrameSeq + "_" + i + ".png";
-            comp.saveFrameToPng(t, new File(pngPath));
-            scratch.push(pngPath);
-
-            var foot = _importWithRetry(new File(pngPath));
-            importedItems.push(foot);
-
-            var lyr = gridComp.layers.add(foot);
+            var lyr = _addCompAtTime(gridComp, comp, t);
             var col = i % cols;
             var row = Math.floor(i / cols);
             var sx = (cellW / comp.width) * 100;
@@ -3719,6 +3726,9 @@ function contactSheet(args) {
                 var td = tl.property("ADBE Text Properties").property("ADBE Text Document").value;
                 td.fontSize = Math.max(10, Math.round(cellH * 0.12));
                 td.fillColor = [1, 1, 1];
+                // New text inherits the alignment last used in AE; force left so the
+                // label starts at the cell corner instead of being cut off by it.
+                td.justification = ParagraphJustification.LEFT_JUSTIFY;
                 tl.property("ADBE Text Properties").property("ADBE Text Document").setValue(td);
                 tl.property("ADBE Transform Group").property("ADBE Position").setValue([col * cellW + 6, row * cellH + cellH - 6]);
             } catch (te) {}
@@ -3733,18 +3743,15 @@ function contactSheet(args) {
         return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) });
     } finally {
         if (gridComp) { try { gridComp.remove(); } catch (ge) {} }
-        for (var k = 0; k < importedItems.length; k++) { try { importedItems[k].remove(); } catch (ie) {} }
-        for (var s = 0; s < scratch.length; s++) { try { var f = new File(scratch[s]); if (f.exists) f.remove(); } catch (se) {} }
     }
 }
 
-// match-reference: import an on-disk reference image, render the current comp
-// frame, and use AE's DIFFERENCE blend mode as a dependency-free diff engine.
-// Returns a side-by-side PNG and a difference-map PNG.
+// match-reference: import an on-disk reference image, nest the comp at the
+// requested time, and use AE's DIFFERENCE blend mode as a dependency-free diff
+// engine. Returns a side-by-side PNG and a difference-map PNG.
 function matchReference(args) {
     var sbsComp = null, diffComp = null;
     var importedItems = [];
-    var scratch = [];
     try {
         _sweepMcpTempComps();
         var comp = _resolveComp(args);
@@ -3758,16 +3765,9 @@ function matchReference(args) {
         var t = (typeof args.time === "number") ? args.time : comp.duration / 2;
         if (t < 0) t = 0; if (t > comp.duration) t = comp.duration;
 
-        // Render the current comp frame and import it + the reference as footage.
-        _seeFrameSeq++;
-        var curPath = folder + "/__mcp_mr_cur_" + _seeFrameSeq + ".png";
-        comp.saveFrameToPng(t, new File(curPath));
-        scratch.push(curPath);
-
+        // Import the reference as footage; the comp itself is nested at time t.
         var refFoot = _importWithRetry(refFile);
         importedItems.push(refFoot);
-        var curFoot = _importWithRetry(new File(curPath));
-        importedItems.push(curFoot);
 
         var rw = refFoot.width, rh = refFoot.height;
 
@@ -3775,8 +3775,8 @@ function matchReference(args) {
         sbsComp = app.project.items.addComp("__mcp_tmp__sbs", rw * 2, rh, 1, 1, comp.frameRate);
         var rL = sbsComp.layers.add(refFoot);
         rL.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
-        var cR = sbsComp.layers.add(curFoot);
-        var csx = (rw / curFoot.width) * 100, csy = (rh / curFoot.height) * 100;
+        var cR = _addCompAtTime(sbsComp, comp, t);
+        var csx = (rw / comp.width) * 100, csy = (rh / comp.height) * 100;
         cR.property("ADBE Transform Group").property("ADBE Scale").setValue([csx, csy]);
         cR.property("ADBE Transform Group").property("ADBE Position").setValue([rw + rw / 2, rh / 2]);
         _seeFrameSeq++;
@@ -3787,8 +3787,8 @@ function matchReference(args) {
         diffComp = app.project.items.addComp("__mcp_tmp__diff", rw, rh, 1, 1, comp.frameRate);
         var dRef = diffComp.layers.add(refFoot);
         dRef.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
-        var dCur = diffComp.layers.add(curFoot);
-        var dsx = (rw / curFoot.width) * 100, dsy = (rh / curFoot.height) * 100;
+        var dCur = _addCompAtTime(diffComp, comp, t);
+        var dsx = (rw / comp.width) * 100, dsy = (rh / comp.height) * 100;
         dCur.property("ADBE Transform Group").property("ADBE Scale").setValue([dsx, dsy]);
         dCur.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
         try { dCur.blendingMode = BlendingMode.DIFFERENCE; } catch (be) {}
@@ -3803,7 +3803,6 @@ function matchReference(args) {
         if (sbsComp) { try { sbsComp.remove(); } catch (e1) {} }
         if (diffComp) { try { diffComp.remove(); } catch (e2) {} }
         for (var k = 0; k < importedItems.length; k++) { try { importedItems[k].remove(); } catch (ie) {} }
-        for (var s = 0; s < scratch.length; s++) { try { var f = new File(scratch[s]); if (f.exists) f.remove(); } catch (se) {} }
     }
 }
 
