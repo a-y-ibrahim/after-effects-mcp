@@ -196,6 +196,104 @@ export function tail(s: string, maxChars: number = 4000): string {
   return s.length > maxChars ? s.slice(s.length - maxChars) : s;
 }
 
+/** What is known about a background aerender job when its outcome is judged. */
+export interface RenderEvidence {
+  /** The launcher process still exists. */
+  alive: boolean;
+  sequenceFileCount?: number | null;
+  /** Exit code of the launcher; `undefined` when its exit was not observed. */
+  exitCode?: number | null;
+  /** Signal that ended the launcher, if any. */
+  signal?: string | null;
+  /** Text of the render log written so far. */
+  logText: string;
+  outputPath: string;
+  /** Size of the output file in bytes, `null` when it does not exist. */
+  outputSize: number | null;
+  /** Modification time of the output file, `null` when it does not exist. */
+  outputMtimeMs: number | null;
+  /** When the render was started. */
+  startedAtMs: number;
+}
+
+export interface RenderAssessment {
+  state: "running" | "finished" | "failed";
+  framesRendered: number;
+  /** Why the render counts as failed. Only set when `state` is "failed". */
+  reason?: string;
+}
+
+/**
+ * Number of frames aerender has reported so far. Progress lines look like
+ * `PROGRESS:  00065 (66): 1 Seconds`; the count in parentheses is used because the
+ * first column follows the project's time display (frames or timecode).
+ */
+export function countRenderedFrames(logText: string): number {
+  let max = 0;
+  const re = /^PROGRESS:\s+\S+ \((\d+)\): /gm;
+  for (let m = re.exec(logText); m; m = re.exec(logText)) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return max;
+}
+
+/** True for an image sequence pattern such as `frame_[#####].png`. */
+export function isSequenceOutput(outputPath: string): boolean {
+  return /\[#+\]/.test(outputPath);
+}
+
+/**
+ * Judge a background render from evidence instead of from the launcher being
+ * gone: a launcher that was killed, or that crashed, is gone as well. A render
+ * counts as finished only when the launcher ended cleanly and wrote the output
+ * file during this run. Log messages are not used for the verdict because After
+ * Effects localizes them. Pure; the caller gathers the evidence.
+ */
+export function assessRender(e: RenderEvidence): RenderAssessment {
+  const framesRendered = countRenderedFrames(e.logText);
+  if (e.alive) return { state: "running", framesRendered };
+
+  const after = `after ${framesRendered} rendered frame${framesRendered === 1 ? "" : "s"}`;
+  if (e.signal) {
+    return {
+      state: "failed",
+      framesRendered,
+      reason: `aerender was ended by signal ${e.signal} ${after}.`,
+    };
+  }
+  if (typeof e.exitCode === "number" && e.exitCode !== 0) {
+    return {
+      state: "failed",
+      framesRendered,
+      reason: `aerender exited with code ${e.exitCode} ${after}.`,
+    };
+  }
+  if (e.exitCode !== 0) {
+    return { state: "failed", framesRendered, reason: "Render completion could not be confirmed: exit code is unknown." };
+  }
+  if (isSequenceOutput(e.outputPath)) {
+    const count = e.sequenceFileCount || 0;
+    if (count === 0 || (framesRendered > 0 && count < framesRendered)) {
+      return { state: "failed", framesRendered, reason: "The output image sequence is missing or incomplete." };
+    }
+  } else {
+    // Allow for coarse file timestamps: a file written within the same second as
+    // the start still counts as written by this run.
+    const stale = e.outputMtimeMs !== null && e.outputMtimeMs < e.startedAtMs - 1000;
+    let problem: string | null = null;
+    if (e.outputSize === null) problem = "the output file does not exist";
+    else if (e.outputSize === 0) problem = "the output file is empty";
+    else if (stale) problem = "the output file is older than this render";
+    if (problem) {
+      const how =
+        e.exitCode === 0 ? "aerender exited with code 0" : "aerender is no longer running";
+      return { state: "failed", framesRendered, reason: `${how} ${after}, but ${problem}.` };
+    }
+  }
+  return { state: "finished", framesRendered };
+}
+
 /**
  * Build the ffmpeg argument list that transcodes any input audio/video file to
  * a 16-bit PCM WAV at `outputPath`, without forcing a sample rate or channel

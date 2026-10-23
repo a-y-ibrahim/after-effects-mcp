@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "after-effects-enhanced": {
+      "command": "node",
+      "args": [
+        "C:/Program Files (x86)/Common Files/Adobe/CEP/extensions/MCP-bridge-AE/build/index.js"
+      ]
+    }
+  }
+}

@@ -114,6 +114,22 @@ export function sampleTimes(duration: number, count: number): number[] {
 }
 
 /**
+ * Return progressive dyadic scan positions. The first pass deliberately checks
+ * both endpoints and the broadest motion changes; later calls refine each
+ * interval by adding its midpoint. Positions are fractions of clip duration.
+ */
+export function progressiveSampleFractions(count: number): number[] {
+  const n = Math.min(Math.max(5, Math.floor(count || 5)), 33);
+  const ordered = [0, 1, 1 / 2, 1 / 4, 3 / 4];
+  for (let denominator = 8; denominator <= 32; denominator *= 2) {
+    for (let numerator = 1; numerator < denominator; numerator += 2) {
+      ordered.push(numerator / denominator);
+    }
+  }
+  return ordered.slice(0, n);
+}
+
+/**
  * Choose a near-square grid (cols x rows) that fits `count` cells, preferring a
  * slightly wider layout (landscape reads better). rows*cols is always >= count.
  */

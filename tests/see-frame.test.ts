@@ -7,6 +7,7 @@ import {
   sampleTimes,
   gridLayout,
   isCompletePng,
+  progressiveSampleFractions,
 } from "../src/lib/see-frame";
 
 describe("normalizeTimes", () => {
@@ -94,6 +95,24 @@ describe("sampleTimes", () => {
 
   it("handles a zero/invalid duration without NaN", () => {
     expect(sampleTimes(0, 3)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("progressiveSampleFractions", () => {
+  it("starts with endpoints, midpoint, and quarters, then refines dyadically", () => {
+    expect(progressiveSampleFractions(5)).toEqual([0, 1, 1 / 2, 1 / 4, 3 / 4]);
+    expect(progressiveSampleFractions(9)).toEqual([
+      0, 1, 1 / 2, 1 / 4, 3 / 4, 1 / 8, 3 / 8, 5 / 8, 7 / 8,
+    ]);
+    expect(progressiveSampleFractions(17).slice(9)).toEqual([
+      1 / 16, 3 / 16, 5 / 16, 7 / 16, 9 / 16, 11 / 16, 13 / 16, 15 / 16,
+    ]);
+  });
+
+  it("defaults to five and caps at 33 positions", () => {
+    expect(progressiveSampleFractions(0)).toHaveLength(5);
+    expect(progressiveSampleFractions(999)).toHaveLength(33);
+    expect(progressiveSampleFractions(33)).toHaveLength(33);
   });
 });
 

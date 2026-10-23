@@ -1,6 +1,6 @@
 {
   "name": "after-effects-mcp",
-  "version": "1.13.0",
+  "version": "1.14.0-local.2-fast-scenes",
   "description": "MCP server that gives AI assistants deep programmatic control of Adobe After Effects: arbitrary ExtendScript execution, background rendering, deep project/layer inspection, and native Arabic/RTL and multilingual support.",
   "main": "build/index.js",
   "bin": {
@@ -10,6 +10,9 @@
     "build/",
     "install-bridge.js",
     "docs/",
+    "skills/",
+    "cep/",
+    "CSXS/",
     "README.md",
     "README.ar.md",
     "CREDITS.md",
@@ -48,8 +51,9 @@
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc && node -e \"require('fs').cpSync('src/scripts','build/scripts',{recursive:true})\"",
+    "build": "npm run clean && tsc && node -e \"require('fs').cpSync('src/scripts','build/scripts',{recursive:true})\" && node scripts/build-cep.mjs",
     "start": "node build/index.js",
+    "build:cep": "node scripts/build-cep.mjs",
     "install-bridge": "node install-bridge.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -63,11 +67,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "~1.9.0",
+    "ws": "^8.18.3",
     "zod": "^3.22.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.0",
+    "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ws://127.0.0.1:*; object-src 'none'">
+  <title>MCP Bridge AE</title>
+  <link rel="stylesheet" href="css/panel.css">
+</head>
+<body>
+  <header><div class="identity"><span class="logo">M</span><div><h1>MCP Bridge <b>AE</b></h1><p id="version">CEP Extension</p></div></div><span class="badge">CEP</span></header>
+  <main>
+    <section class="connection" aria-label="Состояние моста">
+      <div class="status-line"><span id="status-dot" class="dot"></span><h2 id="status" role="status">Подключение…</h2><span id="latency">—</span></div>
+      <p id="detail">Загружаем обработчики After Effects</p>
+      <div class="actions"><button id="toggle" class="primary" disabled>Пауза</button><button id="probe" disabled>Проверить AE</button></div>
+    </section>
+    <div class="metrics"><div><strong id="tools">—</strong><span>инструментов</span></div><div><strong id="processed">0</strong><span>команд</span></div><div><strong id="errors">0</strong><span>ошибок</span></div></div>
+    <section class="activity">
+      <div class="section-title"><h2>Журнал</h2><div><label><input type="checkbox" id="verbose"> Подробно</label><button id="clear" class="text-button">Очистить</button></div></div>
+      <div id="log" tabindex="0" role="log" aria-label="Журнал моста"><p class="empty">Команды и ответы появятся здесь</p></div>
+      <div class="last"><span>Последняя команда</span><code id="last-command">—</code></div>
+    </section>
+    <details id="settings"><summary>Подключение MCP</summary>
+      <p>Используйте этот сервер в настройках MCP-клиента.</p>
+      <label for="server-path">Файл сервера</label><input id="server-path" readonly spellcheck="false">
+      <label for="bridge-path">Папка обмена</label><input id="bridge-path" readonly spellcheck="false">
+      <label for="config">Конфигурация JSON</label><textarea id="config" readonly rows="7" spellcheck="false"></textarea>
+      <button id="copy-config">Копировать конфигурацию</button>
+    </details>
+  </main>
+  <footer><span id="host">After Effects</span><button id="reload" class="text-button">Переподключить</button></footer>
+  <script src="js/CSInterface.js"></script><script src="js/build-info.js"></script><script src="js/live.js"></script><script src="js/panel.js"></script>
+</body>
+</html>

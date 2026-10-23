@@ -1,4 +1,4 @@
-﻿
+
 
 
 
@@ -2928,10 +2928,12 @@ var currentCommandId = "";
 // command under concurrent/rapid tool dispatch). The server matches results purely
 // by _commandId, so AE never needs to write the command file at all.
 var lastProcessedCommandId = "";
-var BRIDGE_VERSION = "1.13.0-mcp-enhanced";
+var BRIDGE_VERSION = "1.14.0-local.2-fast-scenes";
 // Pure read-only commands: they never mutate the project, so we skip the undo
 // group for them (no empty "MCP: ping" entries cluttering Edit > Undo History).
 var READ_ONLY_COMMANDS = {
+    "inspectScene": true,
+    "inspectLayers": true,
     "ping": true,
     "getProjectInfo": true,
     "listCompositions": true,
@@ -3096,6 +3098,13 @@ function getLayerInfo() {
 
 // Resolve a composition by name (preferred), 1-based index among comps, or active item.
 function _resolveComp(args) {
+    if (args && args.compId !== undefined) {
+        for (var ci = 1; ci <= app.project.numItems; ci++) {
+            var candidate = app.project.item(ci);
+            if (candidate instanceof CompItem && candidate.id === args.compId) return candidate;
+        }
+        return null;
+    }
     var comp = null;
     if (args && args.compName) {
         for (var i = 1; i <= app.project.numItems; i++) {
@@ -3512,6 +3521,101 @@ function _layerTypeName(layer) {
 
 // Comp-level map: the full layer tree with a useful summary per layer. Use this to
 // navigate a composition, then inspect-layer for one layer's full detail.
+// BEGIN scene inspection
+var _sceneProject = null, _sceneProjectSerial = 0;
+function _sceneProjectKey() {
+    if (_sceneProject !== app.project) { _sceneProject = app.project; _sceneProjectSerial++; }
+    return String(_sceneProjectSerial) + ":" + (app.project.file ? app.project.file.fsName : "unsaved");
+}
+function _animationHint(group, budget, out) {
+    if (!group || budget.remaining <= 0) { out.incomplete = true; return; }
+    for (var i = 1; i <= group.numProperties; i++) {
+        if (--budget.remaining < 0) { out.incomplete = true; return; }
+        try {
+            var p = group.property(i);
+            if (p.numProperties !== undefined && p.numProperties > 0) _animationHint(p, budget, out);
+            else {
+                if (p.numKeys) out.animatedProperties++;
+                if (p.canSetExpression && p.expressionEnabled) {
+                    out.expressions++;
+                    if (p.expressionError) out.expressionErrors.push({ property: p.matchName, error: String(p.expressionError).slice(0, 300) });
+                }
+            }
+        } catch (e) { out.incomplete = true; }
+    }
+}
+function inspectScene(args) {
+    try {
+        args = args || {};
+        var root = _resolveComp(args), projectScope = args.scope === "project";
+        if (!root && !projectScope) throw new Error("Open a composition or provide compId/compName/compIndex.");
+        var pending = [], seen = {}, nodes = [], truncated = false;
+        var limit = Math.min(50000, Math.max(1, args.maxNodes || 10000));
+        if (projectScope) {
+            for (var pi = 1; pi <= app.project.numItems; pi++) {
+                var item = app.project.item(pi);
+                if (item instanceof CompItem) pending.push(item);
+            }
+        } else pending.push(root);
+        var pos = 0;
+        while (pos < pending.length) {
+            var comp = pending[pos++];
+            if (seen[comp.id]) continue;
+            seen[comp.id] = true;
+            if (nodes.length >= limit) { truncated = true; break; }
+            nodes.push({ key: "comp:" + comp.id, kind: "composition", id: comp.id, name: comp.name, width: comp.width, height: comp.height,
+                frameRate: comp.frameRate, duration: comp.duration, workAreaStart: comp.workAreaStart, workAreaDuration: comp.workAreaDuration, time: comp.time, numLayers: comp.numLayers });
+            for (var i = 1; i <= comp.numLayers; i++) {
+                if (nodes.length >= limit) { truncated = true; break; }
+                var layer = comp.layer(i), lid = null;
+                try { lid = layer.id; } catch (idError) {}
+                var node = { key: "layer:" + comp.id + ":" + (lid === null ? "index-" + i : lid), kind: "layer", compId: comp.id,
+                    id: lid, index: i, name: layer.name, type: _layerTypeName(layer), enabled: layer.enabled, solo: layer.solo,
+                    inPoint: layer.inPoint, outPoint: layer.outPoint, startTime: layer.startTime, threeDLayer: layer.threeDLayer,
+                    parentIndex: layer.parent ? layer.parent.index : null, effects: [] };
+                try { node.parentId = layer.parent ? layer.parent.id : null; } catch (parentError) {}
+                try { node.matteType = enumName(TrackMatteType, layer.trackMatteType); node.matteLayerIndex = layer.trackMatteLayer ? layer.trackMatteLayer.index : null; } catch (matteError) {}
+                try {
+                    var source = layer.source;
+                    if (source) {
+                        node.source = { id: source.id, name: source.name, kind: source instanceof CompItem ? "composition" : "footage" };
+                        if (source instanceof CompItem) pending.push(source);
+                        else {
+                            try { node.source.path = source.file ? source.file.fsName : null; node.source.missing = !!source.footageMissing; } catch (sourceError) {}
+                        }
+                    }
+                } catch (sourceReadError) {}
+                try { var fx = layer.property("ADBE Effect Parade"); for (var f = 1; fx && f <= fx.numProperties; f++) node.effects.push({ name: fx.property(f).name, matchName: fx.property(f).matchName, enabled: fx.property(f).enabled }); } catch (fxError) {}
+                try { var masks = layer.property("ADBE Mask Parade"); node.numMasks = masks ? masks.numProperties : 0; } catch (maskError) {}
+                if (layer instanceof TextLayer) {
+                    try { var text = layer.property("ADBE Text Properties").property("ADBE Text Document").value; node.text = String(text.text).slice(0, 1000); node.textTruncated = text.text.length > 1000; node.font = text.font; } catch (textError) {}
+                }
+                node.animation = { animatedProperties: 0, expressions: 0, expressionErrors: [], incomplete: false };
+                _animationHint(layer, { remaining: 300 }, node.animation);
+                nodes.push(node);
+            }
+            if (truncated) break;
+        }
+        return JSON.stringify({ status: "success", projectKey: _sceneProjectKey(), projectBitsPerChannel: app.project.bitsPerChannel,
+            scope: projectScope ? "project" : "active", rootId: projectScope ? null : root.id, nodes: nodes, truncated: truncated,
+            truncationReason: truncated ? "maxNodes reached; increase maxNodes for a complete graph" : null });
+    } catch (e) { return JSON.stringify({ status: "error", error: String(e) }); }
+}
+function inspectLayers(args) {
+    try {
+        var comp = _resolveComp(args);
+        if (!comp) throw new Error("Composition not found");
+        var results = [], failed = false;
+        for (var i = 0; i < args.layerIndices.length; i++) {
+            var value = JSON.parse(getLayerFull({ compId: comp.id, layerIndex: args.layerIndices[i], includeKeyframes: args.includeKeyframes === true, maxKeyframes: args.maxKeyframes || 50 }));
+            value.requestedIndex = args.layerIndices[i];
+            if (value.status === "error" || value.error) failed = true;
+            results.push(value);
+        }
+        return JSON.stringify({ status: "success", compId: comp.id, partialFailure: failed, results: results });
+    } catch (e) { return JSON.stringify({ status: "error", error: String(e) }); }
+}
+// END scene inspection
 function getCompFull(args) {
     try {
         var comp = _resolveComp(args);
@@ -3559,6 +3663,91 @@ function getCompFull(args) {
 // avoids any collision with a leftover from a previously crashed call).
 var _seeFrameSeq = 0;
 
+// BEGIN MCP synchronous preview renderer
+// saveFrameToPng on AE 26.2 / 32 bpc scales SDR white to about 0.1 in
+// the saved PNG. Render through an explicit 8-bit PNG output module instead:
+// compositing still uses the project's precision, including 32-bpc HDR effects.
+// Rendering is synchronous, so callers can import the completed PNG immediately.
+var _mcpPreviewRenderSeq = 0;
+var _commandRenderMs = 0;
+function _renderAndMeasure(queue) {
+    var started = new Date().getTime();
+    try { queue.render(); }
+    finally { _commandRenderMs += new Date().getTime() - started; }
+}
+function _renderPreviewPng(comp, time, outputPath, motionBlur, quality) {
+    var queue = app.project.renderQueue;
+    if (queue.rendering) throw new Error("Cannot capture a preview while the render queue is rendering.");
+    var output = new File(outputPath);
+    var folder = new Folder(output.fsName + ".render-" + new Date().getTime() + "-" + (++_mcpPreviewRenderSeq));
+    var paused = [], job = null, failure = null, cleanupErrors = [], createdFolder = false;
+    var frameDuration = comp.frameDuration;
+    var lastFrame = Math.max(0, Math.ceil(comp.duration / frameDuration - 0.000001) - 1);
+    var frame = Math.max(0, Math.min(lastFrame, Math.floor(time / frameDuration + 0.000001)));
+    var capturedTime = frame * frameDuration;
+    try {
+        if (folder.exists || !folder.create()) throw new Error("Cannot create preview render folder: " + folder.fsName);
+        createdFolder = true;
+        // DONE items may report render=true, but their render flag cannot be set.
+        // Only QUEUED items can run; temporarily disable exactly those items.
+        for (var i = 1; i <= queue.numItems; i++) {
+            var item = queue.item(i);
+            if (item.status === RQItemStatus.QUEUED) {
+                item.render = false;
+                paused.push(item);
+            }
+        }
+        job = queue.items.add(comp);
+        job.setSettings({ "Quality": "Best", "Resolution": quality === "draft" ? "Quarter" : "Full", "Color Depth": "Current Settings", "Field Render": "Off", "Skip Existing Files": "false" });
+        if (typeof motionBlur === "boolean") {
+            job.setSettings({ "Motion Blur": motionBlur ? "On for Checked Layers" : "Off for All Layers" });
+        }
+        job.timeSpanStart = capturedTime;
+        job.timeSpanDuration = frameDuration;
+        job.skipFrames = 0;
+        // AE's built-in still-output template; do not borrow a user template
+        // that may contain resize, crop, post-render, or output-format settings.
+        job.outputModule(1).applyTemplate("_HIDDEN X-Factor 8");
+        var module = job.outputModule(1);
+        var settings = module.getSettings(GetSettingsFormat.STRING);
+        if (settings.Format !== "PNG Sequence" || settings.Depth !== "Millions of Colors+" || settings.Channels !== "RGB + Alpha" || settings.Color !== "Straight (Unmatted)") {
+            throw new Error("The built-in preview output template must be 8-bit straight-alpha PNG Sequence.");
+        }
+        module.setSettings({ "Output Audio": "Off", "Crop": "false", "Resize": "false", "Use Region of Interest": "false", "Post-Render Action": "None" });
+        // setSettings can invalidate an OutputModule reference; reacquire it.
+        job.outputModule(1).file = new File(folder.fsName + "/frame_[#####].png");
+        try { job.queueItemNotify = false; } catch (notifyError) {}
+        job.render = true;
+        _renderAndMeasure(queue);
+        if (job.status !== RQItemStatus.DONE) throw new Error("Preview render did not complete (status " + job.status + ").");
+        var files = folder.getFiles("frame_*.png");
+        if (files.length !== 1 || !(files[0] instanceof File) || !files[0].copy(output.fsName)) {
+            throw new Error("Preview render did not produce exactly one readable PNG: " + output.fsName);
+        }
+    } catch (error) {
+        failure = error;
+    } finally {
+        if (job) { try { job.remove(); } catch (removeError) { cleanupErrors.push(String(removeError)); } }
+        for (var j = 0; j < paused.length; j++) {
+            try { paused[j].render = true; } catch (restoreError) { cleanupErrors.push(String(restoreError)); }
+        }
+        // This directory was created solely for this capture. Never recurse.
+        if (createdFolder && folder.exists) {
+            var leftovers = folder.getFiles();
+            for (var k = 0; k < leftovers.length; k++) {
+                if (leftovers[k] instanceof File) leftovers[k].remove();
+            }
+            folder.remove();
+        }
+    }
+    if (cleanupErrors.length) throw new Error("Could not restore the preview render queue: " + cleanupErrors.join("; ") + (failure ? "; " + failure : ""));
+    if (failure) throw failure;
+    return capturedTime;
+}
+
+// END MCP synchronous preview renderer
+
+
 // Remove any leftover "__mcp_tmp__" comps from a previous crashed seeFrame call
 // so the user's project is never polluted with our temporaries.
 function _sweepMcpTempComps() {
@@ -3572,7 +3761,7 @@ function _sweepMcpTempComps() {
     } catch (e) {}
 }
 
-// Import a file, retrying briefly. saveFrameToPng writes a PNG synchronously, but
+// Import a completed preview file, retrying briefly. Rendering is synchronous, but
 // on Windows the OS write-lock/flush can lag, so an immediate importFile fails
 // with "File exists but couldn't be open for reading". A short retry loop lets the
 // lock release. Only used for PNGs we just wrote (contact-sheet / match-reference).
@@ -3587,6 +3776,22 @@ function _importWithRetry(file) {
         }
     }
     throw lastErr;
+}
+
+// see-frame: render one or more frames of a comp to PNG and return their paths so
+// the Node side can hand the actual pixels back to the model. Renders a downscaled
+// nested comp when maxWidth < comp.width, so AE performs the downscale before any
+// pixels leave the app.
+function _addCompAtTime(target, comp, t) {
+    // The comp's last frame starts one frame before its end; past that the layer
+    // would already be over at time 0 and the cell would render empty.
+    var last = comp.duration - comp.frameDuration;
+    if (t > last) t = last;
+    if (t < 0) t = 0;
+    var lyr = target.layers.add(comp);
+    lyr.startTime = -t;
+    try { lyr.audioEnabled = false; } catch (e) {}
+    return lyr;
 }
 
 // see-frame: render one or more frames of a comp to PNG and return their paths so
@@ -3619,7 +3824,9 @@ function seeFrame(args) {
         if (!times.length) times = [dur / 2];
 
         var maxWidth = (args && typeof args.maxWidth === "number") ? args.maxWidth : 512;
-        var motionBlur = !!(args && args.motionBlur);
+        var quality = args && args.quality === "draft" ? "draft" : "accurate";
+        var motionBlur = quality === "draft" ? false : !!(args && args.motionBlur);
+        if (quality === "draft") maxWidth = Math.min(comp.width, (maxWidth > 0 ? Math.min(maxWidth, 512) : 512) * 4);
 
         // Pick the render target: the comp itself, or a temp downscale comp nesting it.
         var target = comp;
@@ -3631,10 +3838,10 @@ function seeFrame(args) {
             var scalePct = (tw / comp.width) * 100;
             try { nested.property("ADBE Transform Group").property("ADBE Scale").setValue([scalePct, scalePct]); } catch (e) {}
             try { nested.property("ADBE Transform Group").property("ADBE Position").setValue([tw / 2, th / 2]); } catch (e) {}
-            try { nested.collapseTransformation = true; } catch (e) {}
+            // Render source effects before downscaling the resulting image.
             target = tempComp;
         }
-        try { target.motionBlur = motionBlur; } catch (e) {}
+
 
         var folder = getBridgeFolder().fsName;
         var frames = [];
@@ -3643,14 +3850,18 @@ function seeFrame(args) {
             _seeFrameSeq++;
             var path = folder + "/__mcp_seeframe_" + _seeFrameSeq + "_" + i + ".png";
             try {
-                target.saveFrameToPng(times[i], new File(path));
-                frames.push({ time: times[i], path: path, w: target.width, h: target.height });
+                var frameStarted = new Date().getTime();
+                var capturedTime = _renderPreviewPng(target, times[i], path, motionBlur, quality);
+                var divisor = quality === "draft" ? 4 : 1;
+                frames.push({ time: capturedTime, path: path, w: Math.ceil(target.width / divisor), h: Math.ceil(target.height / divisor), renderMs: new Date().getTime() - frameStarted });
             } catch (fe) {
                 note = (note ? note + " " : "") + "Frame at t=" + times[i] + "s failed: " + fe.toString();
             }
         }
 
-        var out = { status: "success", compName: comp.name, frames: frames };
+        var renderMs = 0; for (var fi = 0; fi < frames.length; fi++) renderMs += frames[fi].renderMs;
+        var out = { status: "success", compName: comp.name, frames: frames, quality: quality, previewBitsPerChannel: 8,
+            projectBitsPerChannel: app.project.bitsPerChannel, motionBlur: motionBlur, resolution: quality === "draft" ? "Quarter" : "Full", renderMs: renderMs };
         if (note) out.note = note;
         if (args && args.includeState) {
             try { out.state = getCompFull({ compName: comp.name }); } catch (se) {}
@@ -3670,8 +3881,6 @@ function seeFrame(args) {
 // polluted.
 function contactSheet(args) {
     var gridComp = null;
-    var importedItems = [];
-    var scratch = [];
     try {
         _sweepMcpTempComps();
         var comp = _resolveComp(args);
@@ -3684,6 +3893,8 @@ function contactSheet(args) {
 
         var folder = getBridgeFolder().fsName;
         var dur = comp.duration;
+        var sampleStart = args && args.workArea ? comp.workAreaStart : 0;
+        var sampleDuration = args && args.workArea ? comp.workAreaDuration : dur;
 
         // near-square grid
         var cols = Math.ceil(Math.sqrt(count));
@@ -3697,16 +3908,8 @@ function contactSheet(args) {
         gridComp = app.project.items.addComp("__mcp_tmp__contact", gw, gh, 1, 1, comp.frameRate);
 
         for (var i = 0; i < count; i++) {
-            _seeFrameSeq++;
-            var t = (dur * (i + 0.5)) / count;
-            var pngPath = folder + "/__mcp_cs_" + _seeFrameSeq + "_" + i + ".png";
-            comp.saveFrameToPng(t, new File(pngPath));
-            scratch.push(pngPath);
-
-            var foot = _importWithRetry(new File(pngPath));
-            importedItems.push(foot);
-
-            var lyr = gridComp.layers.add(foot);
+            var t = sampleStart + (sampleDuration * (i + 0.5)) / count;
+            var lyr = _addCompAtTime(gridComp, comp, t);
             var col = i % cols;
             var row = Math.floor(i / cols);
             var sx = (cellW / comp.width) * 100;
@@ -3719,6 +3922,9 @@ function contactSheet(args) {
                 var td = tl.property("ADBE Text Properties").property("ADBE Text Document").value;
                 td.fontSize = Math.max(10, Math.round(cellH * 0.12));
                 td.fillColor = [1, 1, 1];
+                // New text inherits the alignment last used in AE; force left so the
+                // label starts at the cell corner instead of being cut off by it.
+                td.justification = ParagraphJustification.LEFT_JUSTIFY;
                 tl.property("ADBE Text Properties").property("ADBE Text Document").setValue(td);
                 tl.property("ADBE Transform Group").property("ADBE Position").setValue([col * cellW + 6, row * cellH + cellH - 6]);
             } catch (te) {}
@@ -3726,15 +3932,131 @@ function contactSheet(args) {
 
         _seeFrameSeq++;
         var outPath = folder + "/__mcp_cs_grid_" + _seeFrameSeq + ".png";
-        gridComp.saveFrameToPng(0, new File(outPath));
+        _renderPreviewPng(gridComp, 0, outPath);
 
         return JSON.stringify({ status: "success", compName: comp.name, path: outPath, count: count });
     } catch (e) {
         return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) });
     } finally {
         if (gridComp) { try { gridComp.remove(); } catch (ge) {} }
+    }
+}
+
+// match-reference: import an on-disk reference image, nest the comp at the
+// requested time, and use AE's DIFFERENCE blend mode as a dependency-free diff
+// engine. Returns a side-by-side PNG and a difference-map PNG.
+function previewFootage(args) {
+    var sourceComp = null, gridComp = null, importedFootage = null;
+    var importedItems = [], scratch = [], outPath = null, completed = false;
+    try {
+        _sweepMcpTempComps();
+        if (!args || !args.filePath) return JSON.stringify({ status: "error", error: "filePath is required." });
+        var file = new File(args.filePath);
+        if (!file.exists) return JSON.stringify({ status: "error", error: "Video file not found: " + args.filePath });
+
+        var targetPath = file.fsName.replace(/\\/g, "/").toLowerCase();
+        var footage = null;
+        for (var i = 1; i <= app.project.numItems; i++) {
+            var candidate = app.project.item(i);
+            if (!(candidate instanceof FootageItem) || !(candidate.mainSource instanceof FileSource)) continue;
+            try {
+                var candidatePath = candidate.mainSource.file.fsName.replace(/\\/g, "/").toLowerCase();
+                if (candidatePath === targetPath) { footage = candidate; break; }
+            } catch (pathErr) {}
+        }
+        if (!footage) {
+            try {
+                importedFootage = _importWithRetry(file);
+                footage = importedFootage;
+                importedItems.push(importedFootage);
+            } catch (importErr) {
+                return JSON.stringify({ status: "error", error: "After Effects could not import this video: " + importErr.toString() });
+            }
+        }
+
+        var width = footage.width, height = footage.height;
+        var duration = footage.duration, fps = footage.frameRate;
+        if (footage.hasVideo === false || !(width > 0) || !(height > 0) || !(duration > 0) || !(fps > 0)) {
+            return JSON.stringify({ status: "error", error: "The selected file does not contain a supported video stream." });
+        }
+
+        var requested = (args.fractions && args.fractions.length) ? args.fractions : [0, 1, 0.5, 0.25, 0.75];
+        var count = Math.min(Math.max(Math.round(args.count || requested.length), 5), 33);
+        if (requested.length > count) requested = requested.slice(0, count);
+        var frameCount = Math.max(1, Math.floor(duration * fps + 0.00001));
+        var lastFrame = frameCount - 1;
+        var sampleFrames = [], seenFrames = {};
+        for (var s = 0; s < requested.length; s++) {
+            var fraction = Math.max(0, Math.min(1, Number(requested[s]) || 0));
+            var frameIndex = Math.round(lastFrame * fraction);
+            if (frameIndex < 0) frameIndex = 0;
+            if (frameIndex > lastFrame) frameIndex = lastFrame;
+            if (seenFrames[frameIndex]) continue;
+            seenFrames[frameIndex] = true;
+            sampleFrames.push({ frame: frameIndex, fraction: fraction, time: frameIndex / fps });
+        }
+        if (!sampleFrames.length) return JSON.stringify({ status: "error", error: "No unique source frames were available to sample." });
+
+        var sheetW = (typeof args.maxWidth === "number") ? args.maxWidth : 512;
+        if (sheetW < 64) sheetW = 64;
+        var cols = Math.ceil(Math.sqrt(sampleFrames.length));
+        var rows = Math.ceil(sampleFrames.length / cols);
+        var cellW = Math.round((sheetW / cols) / 2) * 2; if (cellW < 2) cellW = 2;
+        var cellH = Math.round((cellW * height / width) / 2) * 2; if (cellH < 2) cellH = 2;
+        var folder = getBridgeFolder().fsName;
+        sourceComp = app.project.items.addComp("__mcp_tmp__preview_source", width, height, 1, duration, fps);
+        var sourceLayer = sourceComp.layers.add(footage);
+        try { sourceLayer.audioEnabled = false; } catch (audioErr) {}
+        gridComp = app.project.items.addComp("__mcp_tmp__preview_grid", cellW * cols, cellH * rows, 1, 1, fps);
+
+        var samples = [];
+        for (var j = 0; j < sampleFrames.length; j++) {
+            var sample = sampleFrames[j];
+            var col = j % cols, row = Math.floor(j / cols);
+            var layer = _addCompAtTime(gridComp, sourceComp, sample.time);
+            var scale = (cellW / width) * 100;
+            layer.property("ADBE Transform Group").property("ADBE Scale").setValue([scale, scale]);
+            layer.property("ADBE Transform Group").property("ADBE Position").setValue([col * cellW + cellW / 2, row * cellH + cellH / 2]);
+
+            var denom = 1, numer = 0;
+            if (sample.fraction !== 0 && sample.fraction !== 1) {
+                for (var d = 2; d <= 32; d *= 2) {
+                    var scaledFraction = sample.fraction * d;
+                    if (Math.abs(scaledFraction - Math.round(scaledFraction)) < 0.000001) { denom = d; numer = Math.round(scaledFraction); break; }
+                }
+            } else { numer = sample.fraction === 1 ? 1 : 0; }
+            var fractionLabel = numer + "/" + denom;
+            var totalFrames = Math.round(sample.time * fps);
+            var hh = Math.floor(totalFrames / fps / 3600);
+            var mm = Math.floor((totalFrames / fps - hh * 3600) / 60);
+            var ss = Math.floor(totalFrames / fps - hh * 3600 - mm * 60);
+            var ff = totalFrames % Math.round(fps);
+            var timecode = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm + ":" + (ss < 10 ? "0" : "") + ss + ":" + (ff < 10 ? "0" : "") + ff;
+            try {
+                var label = gridComp.layers.addText(fractionLabel + "  " + timecode);
+                var textDoc = label.property("ADBE Text Properties").property("ADBE Text Document").value;
+                textDoc.fontSize = Math.max(8, Math.min(12, Math.floor(cellW / 18)));
+                textDoc.fillColor = [1, 1, 1];
+                textDoc.justification = ParagraphJustification.LEFT_JUSTIFY;
+                label.property("ADBE Text Properties").property("ADBE Text Document").setValue(textDoc);
+                label.property("ADBE Transform Group").property("ADBE Position").setValue([col * cellW + 4, row * cellH + cellH - 4]);
+            } catch (labelErr) {}
+            samples.push({ fraction: sample.fraction, fractionLabel: fractionLabel, time: sample.time, timecode: timecode, frame: sample.frame });
+        }
+
+        _seeFrameSeq++;
+        outPath = folder + "/__mcp_preview_grid_" + _seeFrameSeq + ".png";
+        _renderPreviewPng(gridComp, 0, outPath);
+        completed = true;
+        return JSON.stringify({ status: "success", fileName: file.name, path: outPath, count: samples.length, width: Math.min(sheetW, cellW * cols), samples: samples });
+    } catch (e) {
+        return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) });
+    } finally {
+        if (gridComp) { try { gridComp.remove(); } catch (ge) {} }
+        if (sourceComp) { try { sourceComp.remove(); } catch (sce) {} }
         for (var k = 0; k < importedItems.length; k++) { try { importedItems[k].remove(); } catch (ie) {} }
-        for (var s = 0; s < scratch.length; s++) { try { var f = new File(scratch[s]); if (f.exists) f.remove(); } catch (se) {} }
+        for (var p = 0; p < scratch.length; p++) { try { var frameFile = new File(scratch[p]); if (frameFile.exists) frameFile.remove(); } catch (fe) {} }
+        if (!completed && outPath) { try { var outputFile = new File(outPath); if (outputFile.exists) outputFile.remove(); } catch (oe) {} }
     }
 }
 
@@ -3744,7 +4066,6 @@ function contactSheet(args) {
 function matchReference(args) {
     var sbsComp = null, diffComp = null;
     var importedItems = [];
-    var scratch = [];
     try {
         _sweepMcpTempComps();
         var comp = _resolveComp(args);
@@ -3758,16 +4079,9 @@ function matchReference(args) {
         var t = (typeof args.time === "number") ? args.time : comp.duration / 2;
         if (t < 0) t = 0; if (t > comp.duration) t = comp.duration;
 
-        // Render the current comp frame and import it + the reference as footage.
-        _seeFrameSeq++;
-        var curPath = folder + "/__mcp_mr_cur_" + _seeFrameSeq + ".png";
-        comp.saveFrameToPng(t, new File(curPath));
-        scratch.push(curPath);
-
+        // Import the reference as footage; the comp itself is nested at time t.
         var refFoot = _importWithRetry(refFile);
         importedItems.push(refFoot);
-        var curFoot = _importWithRetry(new File(curPath));
-        importedItems.push(curFoot);
 
         var rw = refFoot.width, rh = refFoot.height;
 
@@ -3775,26 +4089,26 @@ function matchReference(args) {
         sbsComp = app.project.items.addComp("__mcp_tmp__sbs", rw * 2, rh, 1, 1, comp.frameRate);
         var rL = sbsComp.layers.add(refFoot);
         rL.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
-        var cR = sbsComp.layers.add(curFoot);
-        var csx = (rw / curFoot.width) * 100, csy = (rh / curFoot.height) * 100;
+        var cR = _addCompAtTime(sbsComp, comp, t);
+        var csx = (rw / comp.width) * 100, csy = (rh / comp.height) * 100;
         cR.property("ADBE Transform Group").property("ADBE Scale").setValue([csx, csy]);
         cR.property("ADBE Transform Group").property("ADBE Position").setValue([rw + rw / 2, rh / 2]);
         _seeFrameSeq++;
         var sbsPath = folder + "/__mcp_mr_sbs_" + _seeFrameSeq + ".png";
-        sbsComp.saveFrameToPng(0, new File(sbsPath));
+        _renderPreviewPng(sbsComp, 0, sbsPath);
 
         // (2) difference map: current over reference at reference size, DIFFERENCE blend.
         diffComp = app.project.items.addComp("__mcp_tmp__diff", rw, rh, 1, 1, comp.frameRate);
         var dRef = diffComp.layers.add(refFoot);
         dRef.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
-        var dCur = diffComp.layers.add(curFoot);
-        var dsx = (rw / curFoot.width) * 100, dsy = (rh / curFoot.height) * 100;
+        var dCur = _addCompAtTime(diffComp, comp, t);
+        var dsx = (rw / comp.width) * 100, dsy = (rh / comp.height) * 100;
         dCur.property("ADBE Transform Group").property("ADBE Scale").setValue([dsx, dsy]);
         dCur.property("ADBE Transform Group").property("ADBE Position").setValue([rw / 2, rh / 2]);
         try { dCur.blendingMode = BlendingMode.DIFFERENCE; } catch (be) {}
         _seeFrameSeq++;
         var diffPath = folder + "/__mcp_mr_diff_" + _seeFrameSeq + ".png";
-        diffComp.saveFrameToPng(0, new File(diffPath));
+        _renderPreviewPng(diffComp, 0, diffPath);
 
         return JSON.stringify({ status: "success", compName: comp.name, sideBySidePath: sbsPath, diffPath: diffPath });
     } catch (e) {
@@ -3803,7 +4117,6 @@ function matchReference(args) {
         if (sbsComp) { try { sbsComp.remove(); } catch (e1) {} }
         if (diffComp) { try { diffComp.remove(); } catch (e2) {} }
         for (var k = 0; k < importedItems.length; k++) { try { importedItems[k].remove(); } catch (ie) {} }
-        for (var s = 0; s < scratch.length; s++) { try { var f = new File(scratch[s]); if (f.exists) f.remove(); } catch (se) {} }
     }
 }
 
@@ -3963,24 +4276,156 @@ function executeScript(args) {
     }
 }
 
+// BEGIN master depth validation
+function _u32(bytes, offset) {
+    if (offset + 4 > bytes.length) throw new Error("Truncated image header");
+    return (bytes.charCodeAt(offset) & 255) + (bytes.charCodeAt(offset+1) & 255)*256 + (bytes.charCodeAt(offset+2) & 255)*65536 + (bytes.charCodeAt(offset+3) & 255)*16777216;
+}
+function _imageDepth(bytes) {
+    if (bytes.length >= 33 && bytes.slice(1,4) === "PNG" && bytes.slice(12,16) === "IHDR") return { format: "PNG Sequence", bits: bytes.charCodeAt(24) & 255, sampleType: "integer" };
+    if (_u32(bytes,0) !== 20000630) throw new Error("Cannot verify actual depth for this format. Use PNG or OpenEXR for a lossless master.");
+    var offset = 8, result = null, compression = null;
+    function cstring() {
+        var end = bytes.indexOf("\x00", offset);
+        if (end < offset) throw new Error("Truncated EXR header");
+        var value = bytes.slice(offset, end); offset = end+1; return value;
+    }
+    while (offset < bytes.length && bytes.charCodeAt(offset) !== 0) {
+        var name = cstring(), type = cstring(), size = _u32(bytes,offset); offset += 4;
+        var end = offset + size;
+        if (end > bytes.length) throw new Error("Truncated EXR attribute");
+        if (name === "channels" && type === "chlist") {
+            var bits = null, count = 0, sampleType = "float";
+            while (offset < end && bytes.charCodeAt(offset) !== 0) {
+                cstring(); var pixelType = _u32(bytes, offset); offset += 16;
+                if (pixelType !== 1 && pixelType !== 2) throw new Error("EXR channel is not floating point");
+                var channelBits = pixelType === 2 ? 32 : 16;
+                if (bits !== null && bits !== channelBits) throw new Error("Mixed-depth EXR channels");
+                bits = channelBits; count++;
+            }
+            if (!count) throw new Error("No EXR channels");
+            result = { format: "OpenEXR Sequence", bits: bits, sampleType: sampleType };
+        }
+        if (name === "compression" && type === "compression" && size === 1) compression = bytes.charCodeAt(offset) & 255;
+        offset = end;
+    }
+    if (!result) throw new Error("EXR channel metadata missing");
+    var compressionNames = ["None", "RLE", "ZIPS", "ZIP", "PIZ", "PXR24", "B44", "B44A", "DWAA", "DWAB"];
+    result.compression = compressionNames[compression] || "Unknown";
+    result.lossless = compression !== null && compression >= 0 && compression <= 4;
+    return result;
+}
+function _configureMasterItem(item, args) {
+    var bits = app.project.bitsPerChannel;
+    var template = args.outputModuleTemplate || (bits === 32 ? "MCP EXR Float32" : "_HIDDEN X-Factor " + bits);
+    var renderTemplate = args.renderSettingsTemplate || "Best Settings";
+    item.applyTemplate(renderTemplate);
+    var originalDepth = item.getSettings(GetSettingsFormat.STRING)["Color Depth"];
+    item.setSettings({ "Color Depth": "Current Settings", "Skip Existing Files": "false" });
+    try { item.outputModule(1).applyTemplate(template); }
+    catch (templateError) { throw new Error("Output template unavailable: " + template + ". For 32-bpc masters, install MCP EXR Float32 as described in docs/FAST-SCENES.md. " + String(templateError)); }
+    var settings = item.outputModule(1).getSettings(GetSettingsFormat.STRING);
+    if (!args.outputModuleTemplate && settings.Format !== (bits === 32 ? "OpenEXR Sequence" : "PNG Sequence")) throw new Error("Built-in master template has an unexpected format: " + settings.Format);
+    // ExtendScript evaluates chained conditional expressions differently from V8.
+    var nominal = null;
+    if (String(settings.Depth).indexOf("Millions") === 0) nominal = 8;
+    else if (String(settings.Depth).indexOf("Trillions") === 0) nominal = 16;
+    else if (String(settings.Depth).indexOf("Floating") >= 0) nominal = 32;
+    if (nominal !== bits) throw new Error("Output template depth " + settings.Depth + " (parsed " + nominal + ") does not match project " + bits + " bpc.");
+    if (settings.Format !== "PNG Sequence" && settings.Format !== "OpenEXR Sequence") throw new Error("Actual codec depth cannot be verified for " + settings.Format + ". Choose a PNG or OpenEXR master template.");
+    if (!args.outputModuleTemplate) item.outputModule(1).setSettings({ "Output Audio": "Off", "Crop": "false", "Resize": "false", "Post-Render Action": "None" });
+    var extension = settings.Format === "PNG Sequence" ? ".png" : ".exr";
+    var output = args.outputPath;
+    if (output) {
+        if (String(output).toLowerCase().slice(-extension.length) !== extension) throw new Error("Output path must end in " + extension + " for the selected template; format was not changed.");
+    } else {
+        output = getBridgeFolder().fsName + "/" + item.comp.name.replace(/[\\\/:*?"<>|]/g, "_") + "_[#####]" + extension;
+    }
+    if (!/\[#+\]/.test(output)) output = output.slice(0, -extension.length) + "_[#####]" + extension;
+    item.outputModule(1).file = new File(output);
+    return { projectBitsPerChannel: bits, outputBitsPerChannel: null, format: settings.Format, extension: extension,
+        outputModuleTemplate: template, renderSettingsTemplate: renderTemplate, originalRenderDepth: originalDepth,
+        outputPath: item.outputModule(1).file.fsName, calculationDepth: "Current Settings", nominalOutputDepth: settings.Depth,
+        channels: settings.Channels, alphaMode: settings.Color || "Format native" };
+}
+function _probeMasterDepth(metadata) {
+    var queue = app.project.renderQueue, paused = [], comp = null, job = null, folder = null, cleanup = [];
+    if (queue.rendering) throw new Error("Cannot verify master output while AE is rendering.");
+    try {
+        folder = new Folder(getBridgeFolder().fsName + "/master-probe-" + new Date().getTime() + "-" + (++_mcpPreviewRenderSeq));
+        if (folder.exists || !folder.create()) { folder = null; throw new Error("Cannot create master probe directory"); }
+        for (var i = 1; i <= queue.numItems; i++) if (queue.item(i).status === RQItemStatus.QUEUED) { var original = queue.item(i); original.render = false; paused.push(original); }
+        comp = app.project.items.addComp("__mcp_master_probe__", 16, 16, 1, 1, 24);
+        job = queue.items.add(comp);
+        job.applyTemplate(metadata.renderSettingsTemplate);
+        job.setSettings({ "Color Depth": "Current Settings", "Resolution": "Full", "Skip Existing Files": "false" });
+        job.outputModule(1).applyTemplate(metadata.outputModuleTemplate);
+        job.outputModule(1).setSettings({ "Output Audio": "Off", "Crop": "false", "Resize": "false", "Post-Render Action": "None" });
+        job.outputModule(1).file = new File(folder.fsName + "/probe_[#####]" + metadata.extension);
+        job.timeSpanStart = 0; job.timeSpanDuration = 1/24;
+        job.render = true;
+        _renderAndMeasure(queue);
+        if (job.status !== RQItemStatus.DONE) throw new Error("Depth verification render failed");
+        var files = folder.getFiles("probe_*" + metadata.extension);
+        if (files.length !== 1) throw new Error("Depth probe did not produce exactly one image");
+        var file = files[0]; file.encoding = "BINARY";
+        if (!file.open("r")) throw new Error("Cannot read depth probe");
+        var bytes; try { bytes = file.read(1048576); } finally { file.close(); }
+        var actual = _imageDepth(bytes);
+        if (actual.format === "OpenEXR Sequence" && !actual.lossless) throw new Error("EXR compression " + actual.compression + " does not guarantee lossless Float32 output. Save the output template with ZIP compression.");
+        if (actual.bits !== metadata.projectBitsPerChannel || actual.format !== metadata.format || (metadata.projectBitsPerChannel === 32 && actual.sampleType !== "float")) throw new Error("Actual export is " + actual.bits + " bpc; project requires " + metadata.projectBitsPerChannel + ". Select a matching template (for EXR enable 32-bit float, not half float).");
+        metadata.outputBitsPerChannel = actual.bits;
+        metadata.sampleType = actual.sampleType;
+        metadata.compression = actual.compression || "PNG lossless";
+        metadata.depthVerified = true;
+    } finally {
+        if (job) { try { job.remove(); } catch (e) { cleanup.push(String(e)); } }
+        if (comp) { try { comp.remove(); } catch (e) { cleanup.push(String(e)); } }
+        for (var p = 0; p < paused.length; p++) { try { paused[p].render = true; } catch (e) { cleanup.push(String(e)); } }
+        if (folder) { var leftovers = folder.getFiles(); for (var k = 0; k < leftovers.length; k++) if (leftovers[k] instanceof File) leftovers[k].remove(); folder.remove(); }
+        if (cleanup.length) throw new Error("Could not restore depth probe state: " + cleanup.join("; "));
+    }
+    return metadata;
+}
+function prepareBackgroundRender(args) {
+    var item = null;
+    try {
+        if (!app.project.file) throw new Error("Save the project first before background rendering.");
+        if (args.projectPath && new File(args.projectPath).fsName !== app.project.file.fsName) throw new Error("Open the specified project in AE first so its bit depth and output can be verified.");
+        if (args.saveFirst === false && app.project.dirty) throw new Error("Saved project differs from the open project. Save first or use saveFirst: true.");
+        var comp = _resolveComp(args);
+        if (!comp || comp.name !== args.compName) throw new Error("Composition not found");
+        var matches = 0;
+        for (var i=1; i<=app.project.numItems; i++) if(app.project.item(i) instanceof CompItem && app.project.item(i).name === comp.name) matches++;
+        if (matches !== 1) throw new Error("Background rendering requires a unique composition name.");
+        item = app.project.renderQueue.items.add(comp);
+        var metadata = _configureMasterItem(item,args);
+        if (metadata.originalRenderDepth !== "Current Settings") throw new Error("Background render settings template must use Color Depth: Current Settings.");
+        metadata = _probeMasterDepth(metadata);
+        item.remove(); item = null;
+        if (args.saveFirst !== false) app.project.save();
+        metadata.projectPath = app.project.file.fsName;
+        metadata.status = "success";
+        return JSON.stringify(metadata);
+    } catch (e) { return JSON.stringify({ status: "error", error: String(e) }); }
+    finally { if (item) item.remove(); }
+}
+// END master depth validation
+var _masterQueueChecks = [];
+function _masterItemFingerprint(item) {
+    return JSON.stringify({ render: item.getSettings(GetSettingsFormat.STRING), output: item.outputModule(1).getSettings(GetSettingsFormat.STRING), modules: item.numOutputModules });
+}
 // Add a composition to the render queue and configure its output.
 function addToRenderQueue(args) {
+    var rqItem = null, keep = false;
     try {
         var comp = _resolveComp(args);
         if (!comp) {
             return JSON.stringify({ status: "error", error: "Composition not found. Provide compName or compIndex, or open a comp." });
         }
-        var rqItem = app.project.renderQueue.items.add(comp);
-
-        if (args.renderSettingsTemplate) {
-            try { rqItem.applyTemplate(args.renderSettingsTemplate); } catch (rErr) {}
-        }
-        if (args.outputModuleTemplate) {
-            try { rqItem.outputModule(1).applyTemplate(args.outputModuleTemplate); } catch (tErr) {}
-        }
-        if (args.outputPath) {
-            rqItem.outputModule(1).file = new File(args.outputPath);
-        }
+        if (app.project.renderQueue.rendering) throw new Error("Render queue is busy");
+        rqItem = app.project.renderQueue.items.add(comp);
+        var metadata = _probeMasterDepth(_configureMasterItem(rqItem,args));
         if (args.startTime !== undefined) { rqItem.timeSpanStart = args.startTime; }
         if (args.endTime !== undefined) {
             var spanStart = (args.startTime !== undefined) ? args.startTime : 0;
@@ -3989,16 +4434,19 @@ function addToRenderQueue(args) {
 
         var omFile = null;
         try { omFile = rqItem.outputModule(1).file; } catch (e) {}
+        _masterQueueChecks.push({ item: rqItem, bits: app.project.bitsPerChannel, fingerprint: _masterItemFingerprint(rqItem), depth: metadata });
+        keep = true;
         return JSON.stringify({
             status: "success",
             message: "Added to render queue.",
             compName: comp.name,
             renderQueueIndex: app.project.renderQueue.numItems,
-            outputPath: omFile ? omFile.fsName : null
+            outputPath: omFile ? omFile.fsName : null,
+            depth: metadata
         }, null, 2);
     } catch (e) {
         return JSON.stringify({ status: "error", error: e.toString(), line: (e.line !== undefined ? e.line : null) }, null, 2);
-    }
+    } finally { if (rqItem && !keep) rqItem.remove(); }
 }
 
 // List, clear, or remove render queue items.
@@ -4054,23 +4502,41 @@ function startRender(args) {
         if (rq.numItems === 0) {
             return JSON.stringify({ status: "error", error: "Render queue is empty. Use addToRenderQueue first." }, null, 2);
         }
-        var queued = 0;
+        var queued = 0, jobs = [];
         for (var i = 1; i <= rq.numItems; i++) {
-            if (rq.item(i).status === RQItemStatus.QUEUED) { queued++; }
+            var item = rq.item(i);
+            if (item.status === RQItemStatus.QUEUED) {
+                var check = null;
+                for (var c = _masterQueueChecks.length - 1; c >= 0; c--) {
+                    try { if (_masterQueueChecks[c].item === item) { check = _masterQueueChecks[c]; break; } }
+                    catch (removedItemError) { _masterQueueChecks.splice(c, 1); }
+                }
+                if (!check) throw new Error("Queue item " + i + " has no verified master settings in this bridge session. Prepare it with add-to-render-queue before starting.");
+                if (check.bits !== app.project.bitsPerChannel || check.fingerprint !== _masterItemFingerprint(item)) throw new Error("Queue item " + i + " or project depth changed after verification. Prepare the item again before rendering.");
+                queued++; jobs.push({ item: item, index: i, depth: check.depth });
+            }
         }
         if (queued === 0) {
             return JSON.stringify({ status: "error", error: "No QUEUED items. Items may be NEEDS_OUTPUT (missing output path) or already DONE." }, null, 2);
         }
         var startMs = (new Date()).getTime();
-        rq.render();
+        _renderAndMeasure(rq);
         var elapsed = ((new Date()).getTime() - startMs) / 1000;
-        return JSON.stringify({ status: "success", message: "Render complete.", itemsRendered: queued, elapsedSeconds: elapsed }, null, 2);
+        var outcomes = [], failed = false;
+        for (var j = 0; j < jobs.length; j++) {
+            var done = jobs[j].item.status === RQItemStatus.DONE;
+            if (!done) failed = true;
+            outcomes.push({ index: jobs[j].index, compName: jobs[j].item.comp.name, status: done ? "success" : "error", aeStatus: String(jobs[j].item.status), depth: jobs[j].depth });
+        }
+        return JSON.stringify({ status: failed ? "error" : "success", message: failed ? "Some queue items did not finish." : "Render complete.", itemsRendered: outcomes.length, results: outcomes, elapsedSeconds: elapsed }, null, 2);
     } catch (e) {
         return JSON.stringify({ status: "error", error: e.toString() }, null, 2);
     }
 }
 
-function executeCommand(command, args) {
+function executeCommand(command, args, returnOnly) {
+    var executionStarted = new Date().getTime();
+    _commandRenderMs = 0;
     var result = "";
     
     logToPanel("Executing command: " + command);
@@ -4090,9 +4556,11 @@ function executeCommand(command, args) {
         "executeScript": true,
         "startRender": true,
         "addToRenderQueue": true,
+        "prepareBackgroundRender": true,
         "manageRenderQueue": true,
         "seeFrame": true,
         "contactSheet": true,
+        "previewFootage": true,
         "matchReference": true
     };
     var useUndoGroup = !READ_ONLY_COMMANDS[command] && !NO_UNDO_GROUP_COMMANDS[command];
@@ -4281,6 +4749,11 @@ function executeCommand(command, args) {
                 result = contactSheet(args);
                 logToPanel("Returned from contactSheet.");
                 break;
+            case "previewFootage":
+                logToPanel("Calling previewFootage function...");
+                result = previewFootage(args);
+                logToPanel("Returned from previewFootage.");
+                break;
             case "matchReference":
                 logToPanel("Calling matchReference function...");
                 result = matchReference(args);
@@ -4296,6 +4769,9 @@ function executeCommand(command, args) {
                 result = getCompFull(args);
                 logToPanel("Returned from getCompFull.");
                 break;
+            case "inspectScene": result = inspectScene(args); break;
+            case "inspectLayers": result = inspectLayers(args); break;
+            case "prepareBackgroundRender": result = prepareBackgroundRender(args); break;
             case "createCamera":
                 logToPanel("Calling createCamera function...");
                 result = createCamera(args);
@@ -4384,6 +4860,7 @@ function executeCommand(command, args) {
             resultObj._responseTimestamp = new Date().toISOString();
             resultObj._commandExecuted = command;
             resultObj._commandId = currentCommandId;
+            resultObj._timings = { executionMs: new Date().getTime() - executionStarted, renderMs: _commandRenderMs || resultObj.renderMs || 0 };
             resultString = JSON.stringify(resultObj, null, 2);
             logToPanel("Added timestamp to result JSON for tracking freshness.");
         } catch (parseError) {
@@ -4400,6 +4877,7 @@ function executeCommand(command, args) {
             }, null, 2);
         }
         
+        if (returnOnly) return resultString;
         var resultFile = new File(getResultFilePath());
         resultFile.encoding = "UTF-8"; 
         logToPanel("Opening result file for writing...");
@@ -4454,6 +4932,7 @@ function executeCommand(command, args) {
                 _commandId: currentCommandId,
                 _responseTimestamp: new Date().toISOString()
             });
+            if (returnOnly) return errorResult;
             var errorFile = new File(getResultFilePath());
             errorFile.encoding = "UTF-8";
             if (errorFile.open("w")) {
@@ -4596,4 +5075,3 @@ if (panel instanceof Window) {
     panel.layout.resize();
     panel.onResizing = panel.onResize = function () { this.layout.resize(); };
 }
-

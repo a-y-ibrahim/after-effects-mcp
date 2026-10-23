@@ -8,6 +8,10 @@ import * as path from "path";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { fileURLToPath } from "url";
+import { LiveBridge, BridgeMetrics } from "./lib/live-bridge.js";
+import { acquireFileLease } from "./lib/file-lease.js";
+import { registerSceneTools } from "./scene-tools.js";
+import { registerWorkflows } from "./workflows.js";
 import {
   bridgeToolResult,
   atomicWriteSync,
@@ -20,12 +24,15 @@ import {
   tail,
   nextPollDelay,
   POLL_START_MS,
+  assessRender,
+  RenderAssessment,
 } from "./lib/bridge-core.js";
 import { collectPresetFiles } from "./lib/preset-scan.js";
 import { analyzeWavBuffer, WavAnalysis } from "./lib/wav.js";
 import {
   buildFrameContent,
   isCompletePng,
+  progressiveSampleFractions,
   type FrameFile,
   type ContentBlock,
 } from "./lib/see-frame.js";
@@ -43,7 +50,7 @@ import {
 
 const server = new McpServer({
   name: "AfterEffectsServer",
-  version: "1.0.0",
+  version: "1.14.0-local.2-fast-scenes",
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -174,10 +181,10 @@ async function waitForBridgeResult(
   });
 }
 
-function writeCommandFile(command: string, args: Record<string, any> = {}): string {
+function writeCommandFile(command: string, args: Record<string, any> = {}, id?: string): string {
   try {
     const commandFile = path.join(getAETempDir(), "ae_command.json");
-    const commandId = nextCommandId();
+    const commandId = id || nextCommandId();
     lastCommandId = commandId;
     const commandData = {
       command,
@@ -238,18 +245,66 @@ async function sendBridgeCommand(
   timeoutMs: number = 7000,
   pollMs: number = 250,
 ): Promise<string> {
+  const queuedAt = Date.now();
   return bridgeMutex(async () => {
-    clearResultsFile();
-    const id = writeCommandFile(command, args);
-    if (!id) {
-      return JSON.stringify({
-        status: "error",
-        error: `Failed to write the '${command}' command to the bridge folder. Check folder permissions / that it is not a OneDrive-redirected path.`,
-      });
+    const started = Date.now(),
+      id = randomUUID();
+    let transport = "file";
+    try {
+      if (process.env.AE_MCP_TRANSPORT === "file" && process.env.AE_MCP_INSTANCE_ID)
+        throw new Error("Instance targeting requires WebSocket transport; command not sent.");
+      const peer = process.env.AE_MCP_TRANSPORT === "file" ? undefined : liveBridge.select();
+      let raw: string;
+      if (peer) {
+        transport = "websocket";
+        raw = await liveBridge.send(peer, id, command, args, timeoutMs);
+      } else {
+        if (process.env.AE_MCP_TRANSPORT === "websocket")
+          throw new Error("WebSocket panel not connected; command not sent.");
+        const release = await acquireFileLease(getAETempDir(), id, timeoutMs);
+        let known = true;
+        try {
+          clearResultsFile();
+          if (!writeCommandFile(command, args, id))
+            throw new Error("Cannot write command file; command not sent.");
+          known = false;
+          raw = await waitForBridgeResult(command, timeoutMs, pollMs, id);
+          known = JSON.parse(raw)._commandId === id;
+          if (!known)
+            throw new Error(
+              `File command ${id} timed out; outcome unknown. Do not retry the edit.`,
+            );
+        } finally {
+          release(known);
+        }
+      }
+      const data = JSON.parse(raw);
+      const timing = {
+        command,
+        transport,
+        queueMs: started - queuedAt,
+        roundTripMs: Date.now() - started,
+        executionMs: data._timings?.executionMs,
+        renderMs: data._timings?.renderMs ?? data.renderMs ?? 0,
+        responseBytes: Buffer.byteLength(raw),
+        at: new Date().toISOString(),
+      };
+      bridgeMetrics.add(timing);
+      data._timings = { ...data._timings, ...timing };
+      return JSON.stringify(data);
+    } catch (error) {
+      return JSON.stringify({ status: "error", error: String(error), _commandId: id, transport });
     }
-    return waitForBridgeResult(command, timeoutMs, pollMs, id);
   });
 }
+
+const liveBridge = new LiveBridge(getAETempDir());
+const bridgeMetrics = new BridgeMetrics();
+registerSceneTools(server, sendBridgeCommand, () => ({
+  ...liveBridge.status(),
+  ...bridgeMetrics.report(),
+}));
+registerWorkflows(server);
 
 server.resource("compositions", "aftereffects://compositions", async (uri) => {
   const result = await sendBridgeCommand("listCompositions", {}, 8000, 250);
@@ -1678,24 +1733,7 @@ server.tool(
   {},
   async () => {
     try {
-      // Fire-and-forget queue (results fetched later via get-results); still run
-      // it through the mutex so it can't clobber a concurrent command's slot.
-      await bridgeMutex(async () => {
-        clearResultsFile();
-        writeCommandFile("bridgeTestEffects", {});
-      });
-
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Bridge test effects command has been queued.\n` +
-              `Please ensure the "MCP Bridge Auto" panel is open in After Effects.\n` +
-              `Use the "get-results" tool after a few seconds to check for the test results.`,
-          },
-        ],
-      };
+      return bridgeToolResult(await sendBridgeCommand("bridgeTestEffects", {}, 60000));
     } catch (error) {
       return {
         content: [
@@ -2558,7 +2596,7 @@ server.tool(
 
 // Bump this whenever the bridge .jsx protocol changes, and keep it in sync with
 // BRIDGE_VERSION in src/scripts/mcp-bridge-auto.jsx. check-bridge warns on mismatch.
-const EXPECTED_BRIDGE_VERSION = "1.13.0-mcp-enhanced";
+const EXPECTED_BRIDGE_VERSION = "1.14.0-local.2-fast-scenes";
 
 server.tool(
   "check-bridge",
@@ -3540,6 +3578,12 @@ server.tool(
   "see-frame",
   "SEE what a composition actually looks like: render one or more frames to images and return them so you can visually verify and self-correct (make a change, look, fix). Use this after edits to catch problems the DOM does not reveal - clipped or empty text, blown-out glow, off-frame layers, wrong colors, or Arabic/RTL text that did not shape correctly. Select the comp by name or 1-based index, or leave empty for the active comp. Returns downscaled preview images by default (maxWidth 512) to keep it fast and cheap; pass maxWidth 0 for a native-resolution still. Note: a still is a still - time-based effects like motion blur may look different from playback.",
   {
+    quality: z
+      .enum(["draft", "accurate"])
+      .optional()
+      .describe(
+        "draft: quarter-resolution, motion blur off; accurate: existing high-quality capture. Both return 8-bpc PNG; project precision is unchanged.",
+      ),
     comp: z
       .union([z.string(), z.number().int().positive()])
       .optional()
@@ -3578,6 +3622,7 @@ server.tool(
       .describe("How long to wait for the render, in milliseconds (default 60000)."),
   },
   async ({
+    quality = "accurate",
     comp,
     times,
     maxWidth = 512,
@@ -3590,6 +3635,7 @@ server.tool(
       const raw = await sendBridgeCommand(
         "seeFrame",
         {
+          quality,
           compName: typeof comp === "string" ? comp : undefined,
           compIndex: typeof comp === "number" ? comp : undefined,
           times: times === undefined ? undefined : Array.isArray(times) ? times : [times],
@@ -3623,6 +3669,7 @@ server.tool(
           : undefined;
 
       const b64ByPath = new Map<string, string>();
+      const preparationStarted = Date.now();
       const framePaths = frames.filter((f) => f && f.path).map((f) => f.path);
       const b64Results = await Promise.all(framePaths.map((p) => readScratchPngBase64(p)));
       framePaths.forEach((p, i) => {
@@ -3632,6 +3679,18 @@ server.tool(
       const readBase64 = (p: string): string | null => b64ByPath.get(p) ?? null;
 
       const content: ContentBlock[] = buildFrameContent(compName, frames, readBase64, stateJson);
+      content.push({
+        type: "text",
+        text: JSON.stringify({
+          quality: parsed.quality,
+          previewBitsPerChannel: 8,
+          projectBitsPerChannel: parsed.projectBitsPerChannel,
+          motionBlur: parsed.motionBlur,
+          resolution: parsed.resolution,
+          timings: { ...parsed._timings, imagePreparationMs: Date.now() - preparationStarted },
+          capturedAt: parsed._responseTimestamp,
+        }),
+      });
       if (parsed.note) content.push({ type: "text", text: String(parsed.note) });
       const anyImage = content.some((b) => b.type === "image");
       return { content, isError: anyImage ? false : true };
@@ -3721,6 +3780,12 @@ server.tool(
   "contact-sheet",
   "See a composition's whole timeline at a glance: render N frames sampled across the duration and composite them into ONE labeled thumbnail grid, returned as a single image. Use this to perceive motion, timing, and easing cheaply (one image instead of many). Select the comp by name or 1-based index, or leave empty for the active comp.",
   {
+    workArea: z
+      .boolean()
+      .optional()
+      .describe(
+        "Sample only the composition work area (recommended for first inspection). Default false preserves full-duration sampling.",
+      ),
     comp: z
       .union([z.string(), z.number().int().positive()])
       .optional()
@@ -3738,7 +3803,7 @@ server.tool(
       .min(64)
       .max(4096)
       .optional()
-      .describe("Width of the whole grid image in pixels (default 1024)."),
+      .describe("Width of the whole grid image in pixels (default 512)."),
     timeoutMs: z
       .number()
       .int()
@@ -3747,11 +3812,12 @@ server.tool(
       .optional()
       .describe("Wait time in ms (default 90000)."),
   },
-  async ({ comp, count = 9, maxWidth = 1024, timeoutMs = 90000 }) => {
+  async ({ comp, workArea = false, count = 9, maxWidth = 512, timeoutMs = 90000 }) => {
     try {
       const raw = await sendBridgeCommand(
         "contactSheet",
         {
+          workArea,
           compName: typeof comp === "string" ? comp : undefined,
           compIndex: typeof comp === "number" ? comp : undefined,
           count,
@@ -3775,6 +3841,77 @@ server.tool(
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error building contact sheet: ${String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "preview-footage",
+  "Quickly inspect a source video without rendering the full clip: return one labeled contact sheet sampled in progressive priority order. The first pass uses the start, end, midpoint, quarter, and three-quarter frames; request count 9, 17, or 33 to refine the scan.",
+  {
+    filePath: z.string().min(1).describe("Absolute path to the source video file."),
+    count: z
+      .number()
+      .int()
+      .min(5)
+      .max(33)
+      .optional()
+      .describe("Number of prioritized samples (default 5; refine with 9, 17, or 33)."),
+    maxWidth: z
+      .number()
+      .int()
+      .min(64)
+      .max(4096)
+      .optional()
+      .describe("Maximum contact-sheet width in pixels (default 512)."),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(600000)
+      .optional()
+      .describe("Wait time in milliseconds (default 90000)."),
+  },
+  async ({ filePath, count = 5, maxWidth = 512, timeoutMs = 90000 }) => {
+    try {
+      const fractions = progressiveSampleFractions(count);
+      const raw = await sendBridgeCommand(
+        "previewFootage",
+        { filePath, count: fractions.length, fractions, maxWidth },
+        timeoutMs,
+        300,
+      );
+      let parsed: any;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return { content: [{ type: "text", text: raw }], isError: true };
+      }
+      const sheet = parsed?.path
+        ? [
+            {
+              path: parsed.path,
+              caption: `Video contact sheet (${parsed.count || fractions.length} samples, ${parsed.width || maxWidth}px wide)`,
+            },
+          ]
+        : [];
+      const result = await imageResultFromPaths(
+        raw,
+        sheet,
+        `Video preview: ${parsed?.fileName || filePath}`,
+      );
+      if (parsed?.samples?.length) {
+        result.content.splice(1, 0, {
+          type: "text",
+          text: `Scan order: ${parsed.samples.map((s: any) => `${s.fractionLabel} (${s.timecode})`).join(", ")}`,
+        });
+      }
+      return result;
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Error previewing footage: ${String(error)}` }],
         isError: true,
       };
     }
@@ -3841,7 +3978,7 @@ server.tool(
 
 server.tool(
   "add-to-render-queue",
-  "Add a composition to the After Effects render queue and configure its output. Select the comp by compName (most reliable), compIndex (1-based among compositions), or leave both empty to use the active comp. Templates must already exist in this AE installation.",
+  "Prepare a verified master at the current project bit depth. Defaults: PNG sequence for 8/16 bpc, MCP EXR Float32 template for 32 bpc. A tiny sample verifies actual file depth and lossless compression. Currently verified formats are PNG and OpenEXR; incompatible or unverifiable templates are rejected. Select by compName, compIndex, or active comp.",
   {
     compName: z.string().optional().describe("Name of the composition to render (recommended)."),
     compIndex: z
@@ -3854,13 +3991,13 @@ server.tool(
       .string()
       .optional()
       .describe(
-        "Absolute output file path (e.g. C:\\\\renders\\\\out.mov). The extension should match the output module format.",
+        "Absolute .png or .exr output path matching the selected format. A frame-number placeholder is added for a sequence.",
       ),
     outputModuleTemplate: z
       .string()
       .optional()
       .describe(
-        "Name of an existing Output Module template to apply (e.g. 'Lossless', 'H.264 - Match Render Settings - 15 Mbps').",
+        "Existing PNG or OpenEXR output template preserving the project depth. For 32 bpc use Float32 channels with ZIP compression.",
       ),
     renderSettingsTemplate: z
       .string()
@@ -3873,7 +4010,7 @@ server.tool(
   },
   async (parameters) => {
     try {
-      const result = await sendBridgeCommand("addToRenderQueue", parameters, 8000, 250);
+      const result = await sendBridgeCommand("addToRenderQueue", parameters, 90000, 250);
       return bridgeToolResult(result);
     } catch (error) {
       return {
@@ -3972,33 +4109,76 @@ function tailFile(p: string, maxChars: number = 4000): string {
 }
 
 interface RenderJob {
+  depth?: Record<string, unknown>;
+  projectSnapshot?: string;
   pid: number;
   comp: string;
   output: string;
   logPath: string;
   startedAt: string;
+  // Set once the launcher's exit has been observed. A job whose launcher is gone
+  // is not necessarily done: see assessRender.
+  exited: boolean;
+  exitCode?: number | null;
+  signal?: string | null;
 }
 const runningRenders = new Map<number, RenderJob>();
 
-async function getOpenProjectPath(): Promise<string | null> {
-  const raw = await sendBridgeCommand("getProjectInfo", {}, 6000, 250);
+function assessRenderJob(job: RenderJob): RenderAssessment {
+  let logText = "";
   try {
-    const p = JSON.parse(raw);
-    return p && p.path && String(p.path).length > 0 ? String(p.path) : null;
+    logText = fs.readFileSync(job.logPath, "utf8");
   } catch {
-    return null;
+    /* no log yet */
   }
+  let outputSize: number | null = null;
+  let outputMtimeMs: number | null = null;
+  try {
+    const st = fs.statSync(job.output);
+    outputSize = st.size;
+    outputMtimeMs = st.mtimeMs;
+  } catch {
+    /* no output file */
+  }
+  let sequenceFileCount: number | null = null;
+  if (/\[#+\]/.test(job.output)) {
+    sequenceFileCount = 0;
+    const escaped = path.basename(job.output).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp("^" + escaped.replace(/\\\[#+\\\]/, "[0-9]+") + "$");
+    try {
+      for (const name of fs.readdirSync(path.dirname(job.output))) {
+        if (!pattern.test(name)) continue;
+        const st = fs.statSync(path.join(path.dirname(job.output), name));
+        if (st.isFile() && st.size > 0 && st.mtimeMs >= Date.parse(job.startedAt) - 1000)
+          sequenceFileCount++;
+      }
+    } catch {
+      /* missing or unreadable sequence */
+    }
+  }
+  return assessRender({
+    sequenceFileCount,
+    alive: !job.exited,
+    exitCode: job.exitCode,
+    signal: job.signal,
+    logText,
+    outputPath: job.output,
+    outputSize,
+    outputMtimeMs,
+    startedAtMs: Date.parse(job.startedAt),
+  });
 }
 
 server.tool(
   "render-aerender",
-  "Render a composition to a file in the BACKGROUND using aerender (a separate headless After Effects process). Unlike start-render, this does NOT freeze your After Effects UI - you can keep working. REQUIREMENT: the project must be saved to disk (aerender renders the saved .aep). By default it saves the open project first and renders it; pass projectPath to render a specific .aep instead. Returns immediately after starting unless you pass waitMs. Check progress with render-status.",
+  "Render a verified project-depth master in the BACKGROUND using aerender. A tiny foreground probe verifies actual output depth before launch. The named project must be open in AE and saved; by default saves it after validation. Renders an immutable saved copy. Defaults: PNG 8/16 bpc, EXR Float32 for 32 bpc. Unsupported or lower-depth templates fail explicitly. Check progress with render-status.",
   {
     compName: z.string().describe("Name of the composition to render."),
     outputPath: z
       .string()
+      .optional()
       .describe(
-        "Absolute output file path (extension should match the output module, e.g. .mov / .mp4 / .avi).",
+        "Master sequence path: .png for 8/16 bpc or .exr for 32 bpc. Defaults to the bridge folder; frame numbering is added if omitted.",
       ),
     projectPath: z
       .string()
@@ -4010,7 +4190,7 @@ server.tool(
       .boolean()
       .optional()
       .describe(
-        "Save the open project before rendering so unsaved changes are included (default: true). Ignored if projectPath is given.",
+        "Save the open project after validation (default: true). If false, the project must already be saved and clean.",
       ),
     renderSettingsTemplate: z
       .string()
@@ -4022,7 +4202,7 @@ server.tool(
       .string()
       .optional()
       .describe(
-        "Existing Output Module template name (aerender -OMtemplate), e.g. 'Lossless', 'H.264 - Match Render Settings - 15 Mbps'.",
+        "Existing PNG or OpenEXR Output Module template preserving the project depth. For 32 bpc use MCP EXR Float32 with lossless compression.",
       ),
     startFrame: z.number().int().optional().describe("First frame to render (aerender -s)."),
     endFrame: z.number().int().optional().describe("Last frame to render (aerender -e)."),
@@ -4061,96 +4241,96 @@ server.tool(
         };
       }
 
-      let projectPath = p.projectPath;
-      if (!projectPath) {
-        if (p.saveFirst !== false) {
-          await sendBridgeCommand(
-            "executeScript",
-            {
-              script:
-                "if (app.project.file) { app.project.save(); return app.project.file.fsName; } else { return null; }",
-            },
-            20000,
-            300,
-          );
-        }
-        projectPath = (await getOpenProjectPath()) || undefined;
-        if (!projectPath) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(
-                  {
-                    status: "error",
-                    error:
-                      "No saved project found. Save the project in After Effects first (File > Save), or pass projectPath to an existing .aep.",
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-      if (!fs.existsSync(projectPath)) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                { status: "error", error: `Project file does not exist: ${projectPath}` },
-                null,
-                2,
-              ),
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const args = ["-project", projectPath, "-comp", p.compName, "-output", p.outputPath];
-      if (p.renderSettingsTemplate) args.push("-RStemplate", p.renderSettingsTemplate);
-      if (p.outputModuleTemplate) args.push("-OMtemplate", p.outputModuleTemplate);
+      const preparation = JSON.parse(await sendBridgeCommand("prepareBackgroundRender", p, 90000));
+      if (preparation.status === "error" || preparation.error)
+        return bridgeToolResult(JSON.stringify(preparation));
+      const sourceProjectPath: string = preparation.projectPath;
+      if (!fs.existsSync(sourceProjectPath)) throw new Error("Validated saved project is missing.");
+      // Render an immutable copy; subsequent user saves cannot change this job's depth.
+      const projectPath = path.join(getAETempDir(), `aerender-${randomUUID()}.aep`);
+      fs.copyFileSync(sourceProjectPath, projectPath);
+      const outputPath: string = preparation.outputPath;
+      const args = [
+        "-project",
+        projectPath,
+        "-comp",
+        p.compName,
+        "-output",
+        outputPath,
+        "-RStemplate",
+        preparation.renderSettingsTemplate,
+        "-OMtemplate",
+        preparation.outputModuleTemplate,
+      ];
       if (p.startFrame !== undefined) args.push("-s", String(p.startFrame));
       if (p.endFrame !== undefined) args.push("-e", String(p.endFrame));
 
       const logPath = path.join(getAETempDir(), `aerender-${nextCommandId()}.log`);
       const out = fs.openSync(logPath, "a");
-      const child = spawn(aerenderPath, args, { detached: true, stdio: ["ignore", out, out] });
-      child.unref();
+      const child = spawn(aerenderPath, args, {
+        detached: true,
+        windowsHide: true,
+        stdio: ["ignore", out, out],
+      });
+      fs.closeSync(out);
       const pid = child.pid || -1;
-      if (pid > 0)
-        runningRenders.set(pid, {
-          pid,
-          comp: p.compName,
-          output: p.outputPath,
-          logPath,
-          startedAt: new Date().toISOString(),
-        });
+      const job: RenderJob = {
+        pid,
+        comp: p.compName,
+        output: outputPath,
+        logPath,
+        startedAt: new Date().toISOString(),
+        exited: false,
+        depth: preparation,
+        projectSnapshot: projectPath,
+      };
+      child.on("exit", (code, signal) => {
+        job.exited = true;
+        job.exitCode = code;
+        job.signal = signal;
+        try {
+          fs.unlinkSync(projectPath);
+        } catch {
+          /* retained if locked */
+        }
+      });
+      child.on("error", () => {
+        job.exited = true;
+        job.exitCode = -1;
+        try {
+          fs.unlinkSync(projectPath);
+        } catch {
+          /* retained if locked */
+        }
+      });
+      child.unref();
+      if (pid > 0) runningRenders.set(pid, job);
 
       if (p.waitMs && p.waitMs > 0) {
         const start = Date.now();
         while (Date.now() - start < p.waitMs) {
-          if (!pidAlive(pid)) break;
+          if (job.exited || !pidAlive(pid)) break;
           await new Promise((r) => setTimeout(r, 1000));
         }
-        const alive = pidAlive(pid);
-        if (!alive) runningRenders.delete(pid);
+        const verdict = assessRenderJob(job);
+        if (verdict.state !== "running") runningRenders.delete(pid);
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify(
                 {
-                  status: alive ? "running" : "finished",
+                  status: verdict.state,
+                  ...(verdict.reason ? { error: verdict.reason } : {}),
+                  framesRendered: verdict.framesRendered,
+                  ...(job.exited ? { exitCode: job.exitCode, signal: job.signal } : {}),
                   pid,
                   comp: p.compName,
-                  output: p.outputPath,
+                  output: outputPath,
                   aerender: aerenderPath,
                   projectPath,
+                  sourceProjectPath,
+                  depth: preparation,
                   logPath,
                   logTail: tailFile(logPath),
                 },
@@ -4159,6 +4339,7 @@ server.tool(
               ),
             },
           ],
+          ...(verdict.state === "failed" ? { isError: true } : {}),
         };
       }
 
@@ -4171,9 +4352,11 @@ server.tool(
                 status: "started",
                 pid,
                 comp: p.compName,
-                output: p.outputPath,
+                output: outputPath,
                 aerender: aerenderPath,
                 projectPath,
+                sourceProjectPath,
+                depth: preparation,
                 logPath,
                 note: "Rendering in the background. Use render-status to check progress.",
               },
@@ -4194,7 +4377,7 @@ server.tool(
 
 server.tool(
   "render-status",
-  "Check background aerender renders started with render-aerender: which are still running, which finished, and the tail of each render log.",
+  "Check background aerender renders started with render-aerender: which are still running, which finished, which failed and why, and the tail of each render log.",
   {
     pid: z
       .number()
@@ -4228,14 +4411,18 @@ server.tool(
         };
       }
       const renders = jobs.map((j) => {
-        const alive = pidAlive(j.pid);
-        if (!alive) runningRenders.delete(j.pid);
+        const verdict = assessRenderJob(j);
+        if (verdict.state !== "running") runningRenders.delete(j.pid);
         return {
           pid: j.pid,
           comp: j.comp,
           output: j.output,
+          depth: j.depth,
           startedAt: j.startedAt,
-          state: alive ? "running" : "finished",
+          state: verdict.state,
+          ...(verdict.reason ? { error: verdict.reason } : {}),
+          framesRendered: verdict.framesRendered,
+          ...(j.exited ? { exitCode: j.exitCode, signal: j.signal } : {}),
           logTail: tailFile(j.logPath),
         };
       });
@@ -4257,6 +4444,20 @@ async function main() {
   console.error(`Temp directory: ${TEMP_DIR}`);
 
   const transport = new StdioServerTransport();
+  if (process.env.AE_MCP_TRANSPORT !== "file") {
+    try {
+      await liveBridge.start();
+    } catch (error) {
+      if (process.env.AE_MCP_TRANSPORT === "websocket") throw error;
+      console.error("Live bridge unavailable; using file bridge:", error);
+    }
+  }
+  const close = () => {
+    void liveBridge.close().finally(() => process.exit(0));
+  };
+  process.once("SIGINT", close);
+  process.once("SIGTERM", close);
+  process.stdin.once("end", close);
   await server.connect(transport);
   console.error("After Effects MCP Server running...");
 }
